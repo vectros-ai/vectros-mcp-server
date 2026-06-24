@@ -1,0 +1,11 @@
+node_modules/
+dist/
+*.tsbuildinfo
+.npmrc.ci
+
+# tsup leaves these on incremental builds
+*.tmp
+
+# Ephemeral tsconfig the packages_sdk_conformance CI job generates
+# (src-only `include` override for `tsc --noEmit`); never committed.
+tsconfig.conformance.json
