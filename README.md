@@ -1,5 +1,8 @@
 # @vectros-ai/mcp-server
 
+[![npm](https://img.shields.io/npm/v/@vectros-ai/mcp-server)](https://www.npmjs.com/package/@vectros-ai/mcp-server)
+[![license](https://img.shields.io/npm/l/@vectros-ai/mcp-server)](https://www.apache.org/licenses/LICENSE-2.0)
+
 A [Model Context Protocol](https://modelcontextprotocol.io) server
 that exposes Vectros — hybrid search, structured records, documents,
 and in-perimeter RAG / document Q&A — to MCP-aware agents (Claude

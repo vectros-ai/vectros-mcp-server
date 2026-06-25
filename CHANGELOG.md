@@ -3,6 +3,17 @@
 All notable changes to `@vectros-ai/mcp-server` are documented here.
 This project adheres to [Semantic Versioning](https://semver.org).
 
+## 0.5.1 — 2026-06-25
+
+Maintenance — refreshed the bundled Vectros SDK to the current API surface.
+
+### Changed
+
+- Updated the bundled `@vectros-ai/sdk` to **0.29.9**, keeping the server aligned
+  with the current Vectros API. Records and documents with no searchable text now
+  report the `SKIPPED` index status (stored and retrievable, simply not indexed)
+  rather than `FAILED`. No tools, parameters, or results changed shape.
+
 ## 0.5.0 — 2026-06-20
 
 Initial public release of the Vectros MCP server.
