@@ -3,19 +3,31 @@
 [![npm](https://img.shields.io/npm/v/@vectros-ai/mcp-server)](https://www.npmjs.com/package/@vectros-ai/mcp-server)
 [![license](https://img.shields.io/npm/l/@vectros-ai/mcp-server)](https://www.apache.org/licenses/LICENSE-2.0)
 
-A [Model Context Protocol](https://modelcontextprotocol.io) server
-that exposes Vectros — hybrid search, structured records, documents,
-and in-perimeter RAG / document Q&A — to MCP-aware agents (Claude
-Desktop, Cursor, Code, Cline, Continue, VS Code, hosted agent
-platforms).
+[![Add to Cursor](https://cursor.com/deeplink/mcp-install-dark.svg)](https://cursor.com/install-mcp?name=vectros&config=eyJjb21tYW5kIjoibnB4IiwiYXJncyI6WyIteSIsIkB2ZWN0cm9zLWFpL21jcC1zZXJ2ZXIiXSwiZW52Ijp7IlZFQ1RST1NfQVBJX0tFWSI6IiJ9fQ%3D%3D)
+[![Install in VS Code](https://img.shields.io/badge/VS_Code-Install-0098FF?logo=visualstudiocode&logoColor=white)](https://insiders.vscode.dev/redirect/mcp/install?name=vectros&config=%7B%22command%22%3A%22npx%22%2C%22args%22%3A%5B%22-y%22%2C%22%40vectros-ai%2Fmcp-server%22%5D%2C%22env%22%3A%7B%22VECTROS_API_KEY%22%3A%22%22%7D%7D)
+[![Claude Desktop Extension](https://img.shields.io/badge/Claude_Desktop-Add_Extension-D97757)](https://github.com/vectros-ai/vectros-mcp-server/releases/latest/download/vectros.mcpb)
+
+> One-click badges install the **server entry** in your client. You still supply
+> a key — run `npx -y @vectros-ai/cli bootstrap` (recommended) or paste your
+> `ssk_...`. See [Connect from your client](#connect-from-your-client) and the
+> [honest caveats](#honest-caveats).
+
+A [Model Context Protocol](https://modelcontextprotocol.io) server for
+**Vectros** — a typed, multi-tenant **record store unified with hybrid
+search** and citation-grounded RAG. Deterministic lookups and enumeration
+*and* semantic search over one isolated, per-customer index of records and
+documents — so an agent gets memory that's precise, not just fuzzy recall.
+Reached agent-natively here over MCP (Claude Desktop, Cursor, Claude Code,
+Cline, Continue, VS Code, hosted platforms) — and the same data is
+human-accessible through the Vectros app + SDKs.
 
 ```
 npx -y @vectros-ai/mcp-server
 ```
 
 Your agent can search your indexed corpus, query structured records,
-ingest documents, and ask questions grounded against documents — all
-without leaving the BAA boundary.
+ingest documents, and ask questions grounded against documents — reaching
+only your tenant's data, never the public web (there are no web tools).
 
 ## Quick start — one command
 
@@ -52,6 +64,47 @@ VECTROS_BOOTSTRAP_TOKEN=… npx -y @vectros-ai/cli bootstrap \
 ```
 
 Prefer to wire it up by hand? See **Configure manually** below.
+
+## Connect from your client
+
+| Client | One-click | Manual |
+|---|---|---|
+| **Claude Desktop** | [Desktop Extension (`.mcpb`)](https://github.com/vectros-ai/vectros-mcp-server/releases/latest/download/vectros.mcpb) — double-click, paste your key | [JSON snippet](#configure-manually-claude-desktop-or-any-mcp-client) |
+| **Cursor** | [![Add to Cursor](https://cursor.com/deeplink/mcp-install-dark.svg)](https://cursor.com/install-mcp?name=vectros&config=eyJjb21tYW5kIjoibnB4IiwiYXJncyI6WyIteSIsIkB2ZWN0cm9zLWFpL21jcC1zZXJ2ZXIiXSwiZW52Ijp7IlZFQ1RST1NfQVBJX0tFWSI6IiJ9fQ%3D%3D) | `.cursor/mcp.json`, same shape as below |
+| **VS Code** | [![Install in VS Code](https://img.shields.io/badge/VS_Code-Install-0098FF?logo=visualstudiocode&logoColor=white)](https://insiders.vscode.dev/redirect/mcp/install?name=vectros&config=%7B%22command%22%3A%22npx%22%2C%22args%22%3A%5B%22-y%22%2C%22%40vectros-ai%2Fmcp-server%22%5D%2C%22env%22%3A%7B%22VECTROS_API_KEY%22%3A%22%22%7D%7D) | `.vscode/mcp.json`, same shape |
+| **Claude Code** | `claude mcp add` (below) | [project `.mcp.json`](#configure-manually-claude-code) |
+| **Cline / Continue** | — | same JSON snippet as Claude Desktop |
+| **Smithery** | `npx -y @smithery/cli install @vectros-ai/mcp-server` | — |
+| **Codex** | — | TOML snippet (below) |
+
+The fastest path on **every** client is `npx -y @vectros-ai/cli bootstrap` — it
+mints a scoped key and writes the config for you. The one-click buttons install
+the server entry; you then supply the key (bootstrap, or paste your `ssk_...`).
+
+**Codex** (`~/.codex/config.toml`):
+
+```toml
+[mcp_servers.vectros]
+command = "npx"
+args = ["-y", "@vectros-ai/mcp-server"]
+env = { VECTROS_API_KEY = "ssk_live_..." }
+```
+
+## Honest caveats
+
+Precision is the pitch — what this server deliberately does *not* do:
+
+- **There's a human step.** Bootstrap needs a developer-portal sign-in / bridge
+  token. One command, but a person signs in — there is no fully unattended
+  provisioning.
+- **No web tools, on purpose.** The agent surface has no web-search or web-fetch
+  tools at all. Vectros is the memory, not the browser.
+- **Agent document upload is text-inline today.** An agent ingests document text
+  inline; on the stdio transport a jailed local-file upload is supported, but
+  bulk file upload from the agent surface isn't the path today.
+- **Audit history is tamper-*evident*, not tamper-proof.** A state-continuity
+  chain makes out-of-band alteration *detectable*; it is not continuous
+  automated verification.
 
 ## Configure manually (Claude Desktop or any MCP client)
 
@@ -226,8 +279,12 @@ a sidecar — the package also ships an HTTP binary:
 VECTROS_API_KEY=ssk_live_... \
 VECTROS_MCP_HTTP_PORT=8765 \
 VECTROS_MCP_HTTP_BEARER_TOKEN=$(openssl rand -hex 32) \
-  npx -y @vectros-ai/mcp-server vectros-mcp-server-http
+  npx -y -p @vectros-ai/mcp-server vectros-mcp-server-http
 ```
+
+> The HTTP binary is **not** the default — select it explicitly with
+> `npx -p <pkg> vectros-mcp-server-http`. A bare `npx -y @vectros-ai/mcp-server`
+> always starts the stdio server.
 
 The server listens on `http://127.0.0.1:8765/mcp` by default. The
 bearer token is optional but **strongly recommended for any
@@ -277,10 +334,18 @@ await server.connect(createStdioTransport());
 
 The server is on a pre-1.0 track toward a stable 1.0 release.
 
+## Rate limits
+
+Tool calls hit the same per-account per-minute rate limit as any API client (writes, searches,
+and inference count against it; reads do not). On a `429` the server surfaces the error with its
+`Retry-After` hint so the agent can pace and retry rather than blind-retrying. See the
+[rate limits guide](https://docs.vectros.ai/guides/operations-trust/rate-limits) for the per-plan
+limits.
+
 ## Building from source
 
 ```sh
-git clone https://github.com/vectros-ai/mcp-server
+git clone https://github.com/vectros-ai/vectros-mcp-server
 cd mcp-server
 npm install
 npm run build

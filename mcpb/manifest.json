@@ -1,0 +1,65 @@
+{
+  "manifest_version": "0.3",
+  "name": "vectros",
+  "display_name": "Vectros — Memory for Agents",
+  "version": "0.5.2",
+  "description": "Typed record store + hybrid search over MCP: deterministic lookups + semantic memory, per-customer.",
+  "long_description": "Vectros is a typed, multi-tenant record store unified with hybrid search and citation-grounded RAG — deterministic lookups and enumeration AND semantic search over one isolated, per-customer index of records and documents, so an agent gets memory that's precise, not just fuzzy recall. It's reached agent-natively over MCP and human-natively through the Vectros app + SDKs. This extension connects Claude Desktop to your Vectros tenant through 21 data-plane tools (typed records, documents, hybrid search, and citation-grounded RAG). There are no web-search or scraping tools, by design.\n\nYou provide a least-privilege scoped key (ssk_...). Don't have one yet? Run `npx -y @vectros-ai/cli bootstrap` — it mints a scoped key and an AccessProfile for you (a one-time developer-portal sign-in is required).",
+  "author": {
+    "name": "Vectros",
+    "url": "https://vectros.ai"
+  },
+  "homepage": "https://vectros.ai",
+  "documentation": "https://github.com/vectros-ai/vectros-mcp-server",
+  "support": "https://github.com/vectros-ai/vectros-mcp-server/issues",
+  "server": {
+    "type": "node",
+    "entry_point": "server/index.js",
+    "mcp_config": {
+      "command": "node",
+      "args": ["${__dirname}/server/index.js"],
+      "env": {
+        "VECTROS_API_KEY": "${user_config.api_key}"
+      }
+    }
+  },
+  "user_config": {
+    "api_key": {
+      "type": "string",
+      "title": "Vectros API key",
+      "description": "Your scoped key (ssk_...). Don't have one? Run `npx -y @vectros-ai/cli bootstrap` to mint a least-privilege key — it requires a one-time developer-portal sign-in (a real human step; there is no unattended provisioning).",
+      "sensitive": true,
+      "required": true
+    }
+  },
+  "tools": [
+    { "name": "hybrid_search", "description": "Hybrid BM25 + dense search across the tenant's indexed records and documents." },
+    { "name": "rag_ask", "description": "Ask a question grounded against the indexed corpus (retrieval-augmented generation)." },
+    { "name": "document_ask", "description": "Ask a question grounded against a single document." },
+    { "name": "list_schemas", "description": "List the record-schema catalog the credential can see." },
+    { "name": "record_query", "description": "Query records by lookup field or list mode." },
+    { "name": "record_get", "description": "Fetch one record by id, including its full payload." },
+    { "name": "record_create", "description": "Create a record of a given type; idempotent by externalId." },
+    { "name": "record_update", "description": "Patch a record's payload with optimistic concurrency." },
+    { "name": "record_delete", "description": "Delete a record by id (leaves a tombstone)." },
+    { "name": "document_ingest", "description": "Create a document from inline text or a jailed local file (stdio only)." },
+    { "name": "document_query", "description": "Query documents by lookup field or list mode." },
+    { "name": "document_get", "description": "Fetch a document by id (metadata, optional text, optional download URL)." },
+    { "name": "document_update", "description": "Patch a document's metadata / typed payload." },
+    { "name": "document_delete", "description": "Delete a document by id and its indexed content." },
+    { "name": "folder_query", "description": "Get a folder by id, or list folders for tree navigation." },
+    { "name": "folder_create", "description": "Create a folder." },
+    { "name": "folder_update", "description": "Update a folder's name / description / ownership." },
+    { "name": "folder_delete", "description": "Delete a folder." },
+    { "name": "current_identity", "description": "Describe the credential: tenant, environment, principal, scope." },
+    { "name": "lookup_principal", "description": "Resolve a user / org / client by your own externalId or a schema lookup field." },
+    { "name": "version_history", "description": "Read the audit/version trail for one record or document." }
+  ],
+  "compatibility": {
+    "claude_desktop": ">=0.10.0",
+    "platforms": ["darwin", "win32", "linux"],
+    "runtimes": {
+      "node": ">=20.0.0"
+    }
+  }
+}

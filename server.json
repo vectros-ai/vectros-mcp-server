@@ -1,0 +1,40 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.vectros-ai/mcp-server",
+  "description": "Typed record store + hybrid search over MCP: deterministic lookups + semantic memory, per-customer.",
+  "version": "0.5.2",
+  "websiteUrl": "https://vectros.ai",
+  "repository": {
+    "url": "https://github.com/vectros-ai/vectros-mcp-server",
+    "source": "github"
+  },
+  "packages": [
+    {
+      "registryType": "npm",
+      "registryBaseUrl": "https://registry.npmjs.org",
+      "identifier": "@vectros-ai/mcp-server",
+      "version": "0.5.2",
+      "transport": {
+        "type": "stdio"
+      },
+      "environmentVariables": [
+        {
+          "name": "VECTROS_API_KEY",
+          "description": "Vectros API key. Use a least-privilege scoped key (ssk_...); mint one with `npx -y @vectros-ai/cli bootstrap`.",
+          "isRequired": true,
+          "isSecret": true
+        },
+        {
+          "name": "VECTROS_API_BASE_URL",
+          "description": "Override the API base URL (default https://api.vectros.ai). Must be an official *.vectros.ai host.",
+          "isRequired": false
+        },
+        {
+          "name": "VECTROS_MCP_TOOLS",
+          "description": "Comma-separated subset of tool names to register (default: all 21 tools).",
+          "isRequired": false
+        }
+      ]
+    }
+  ]
+}

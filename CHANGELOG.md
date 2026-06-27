@@ -3,6 +3,32 @@
 All notable changes to `@vectros-ai/mcp-server` are documented here.
 This project adheres to [Semantic Versioning](https://semver.org).
 
+## 0.5.2 — 2026-06-26
+
+Distribution fix + SDK refresh. No tool, parameter, or result shapes changed.
+
+### Fixed
+
+- `npx -y @vectros-ai/mcp-server` now starts the (stdio) server directly. The
+  package previously exposed only `vectros-mcp-server` and
+  `vectros-mcp-server-http`, so a bare `npx -y @vectros-ai/mcp-server` — the form
+  used in every client config and registry listing — could not pick a binary and
+  failed with *"could not determine executable to run."* A `mcp-server` binary
+  (matching the package's unscoped name) now makes the bare invocation resolve to
+  the stdio server. The explicit `vectros-mcp-server` / `vectros-mcp-server-http`
+  binaries are unchanged.
+
+### Changed
+
+- Updated the bundled `@vectros-ai/sdk` to **0.30.0**, keeping the server aligned
+  with the current Vectros API.
+
+### Added
+
+- A `server.json` manifest (official MCP Registry schema) at the repository root,
+  plus one-click install artifacts: a Claude Desktop Extension (`.mcpb`),
+  `smithery.yaml`, and "Add to Cursor" / VS Code install links.
+
 ## 0.5.1 — 2026-06-25
 
 Maintenance — refreshed the bundled Vectros SDK to the current API surface.

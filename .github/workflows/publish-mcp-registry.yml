@@ -1,0 +1,65 @@
+# Publish this server to the official MCP Registry.
+#
+# This repository is a PUBLIC MIRROR of an upstream monorepo. The npm package is
+# already built, tested, and published upstream BEFORE the mirror is updated, so
+# this workflow does ONLY the registry publish — it does not build, test, or
+# publish to npm. It reads server.json (kept in version-lockstep with the npm
+# package upstream) and registers it.
+#
+# Auth: GitHub OIDC. Because this repo is owned by the `vectros-ai` org, the
+# OIDC token proves ownership of the `io.github.vectros-ai/*` namespace declared
+# in server.json — no stored secret. The published npm package additionally
+# carries `mcpName`, which the registry cross-checks for package ownership.
+#
+# Trigger: a push to main that changes server.json. The mirror bumps server.json's
+# version on every release, so this fires once per release. Registry versions are
+# immutable; a same-version re-run fails loudly by design. Manual re-runs via the
+# Actions tab are also supported.
+name: Publish to MCP Registry
+
+on:
+  push:
+    branches: [main]
+    paths: ["server.json"]
+  workflow_dispatch:
+
+# Avoid overlapping publishes if two releases land close together.
+concurrency:
+  group: mcp-registry-publish
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write # required for OIDC authentication to the registry
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install mcp-publisher
+        run: |
+          curl -L "https://github.com/modelcontextprotocol/registry/releases/latest/download/mcp-publisher_$(uname -s | tr '[:upper:]' '[:lower:]')_$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/').tar.gz" | tar xz mcp-publisher
+
+      # The registry verifies npm ownership by fetching the package's published
+      # package.json (mcpName). The npm publish happens upstream just before the
+      # mirror push that triggers this run, so wait out read-after-write latency
+      # before publishing, rather than hard-failing on a not-yet-visible version.
+      - name: Wait for the npm version to be visible
+        run: |
+          PKG=$(jq -r '.packages[0].identifier' server.json)
+          V=$(jq -r '.version' server.json)
+          for i in $(seq 1 30); do
+            if npm view "$PKG@$V" version >/dev/null 2>&1; then
+              echo "✅ $PKG@$V is live on npm"; exit 0
+            fi
+            echo "waiting for $PKG@$V on npm ($i/30)…"; sleep 10
+          done
+          echo "❌ timed out waiting for $PKG@$V on npm"; exit 1
+
+      - name: Authenticate (GitHub OIDC)
+        run: ./mcp-publisher login github-oidc
+
+      - name: Publish to MCP Registry
+        run: ./mcp-publisher publish

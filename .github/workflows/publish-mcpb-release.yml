@@ -1,0 +1,58 @@
+# Build the Claude Desktop extension (.mcpb) and attach it to a GitHub Release
+# under a STABLE name (vectros.mcpb), so the one-click badge
+# `…/releases/latest/download/vectros.mcpb` always resolves to the newest build.
+#
+# This repository is a PUBLIC MIRROR; the npm package is already published upstream
+# before the mirror updates. This workflow only packs the bundle (from mcpb/) and
+# publishes the GitHub Release — it does not build or publish npm.
+#
+# Auth: the built-in GITHUB_TOKEN with `contents: write` (no external secret).
+# Trigger: a push to main that bumps the manifest/version (i.e. each release), or
+# a manual run. Idempotent — re-running clobbers the asset on the existing release.
+name: Publish .mcpb to GitHub Release
+
+on:
+  push:
+    branches: [main]
+    paths: ["mcpb/manifest.json", "server.json"]
+  workflow_dispatch:
+
+concurrency:
+  group: mcpb-release
+  cancel-in-progress: false
+
+permissions:
+  contents: write # create the release + upload the asset
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Read version from manifest
+        id: ver
+        run: echo "version=$(jq -r .version mcpb/manifest.json)" >> "$GITHUB_OUTPUT"
+
+      - name: Pack .mcpb (stable filename)
+        run: npx -y @anthropic-ai/mcpb pack mcpb vectros.mcpb
+
+      - name: Create or update the GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          V: ${{ steps.ver.outputs.version }}
+        run: |
+          if gh release view "v$V" >/dev/null 2>&1; then
+            gh release upload "v$V" vectros.mcpb --clobber
+          else
+            gh release create "v$V" vectros.mcpb \
+              --target main \
+              --title "v$V" \
+              --notes "Vectros MCP server v$V — Claude Desktop one-click install. Download vectros.mcpb and open it in Claude Desktop (Settings → Extensions), then add your Vectros API key (or run \`npx -y @vectros-ai/cli bootstrap\`)."
+          fi

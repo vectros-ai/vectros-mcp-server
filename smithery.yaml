@@ -1,0 +1,38 @@
+# Smithery configuration for @vectros-ai/mcp-server
+# https://smithery.ai/docs/build/project-config/smithery.yaml
+#
+# Local stdio server: Smithery's guided install writes a client config that runs
+# the published package via `npx`. It does NOT provision a credential — the user
+# supplies a scoped key (ssk_...). The easiest way to get one is
+# `npx -y @vectros-ai/cli bootstrap`, which mints a least-privilege key after a
+# one-time developer-portal sign-in (a real human step).
+startCommand:
+  type: stdio
+  configSchema:
+    type: object
+    required:
+      - vectrosApiKey
+    properties:
+      vectrosApiKey:
+        type: string
+        title: Vectros API key
+        description: >-
+          Your scoped Vectros key (ssk_...). Don't have one? Run
+          `npx -y @vectros-ai/cli bootstrap` to mint a least-privilege key
+          (requires a one-time developer-portal sign-in).
+      apiBaseUrl:
+        type: string
+        title: API base URL (optional)
+        description: >-
+          Override the API base URL. Defaults to https://api.vectros.ai; must be
+          an official *.vectros.ai host.
+        default: https://api.vectros.ai
+  commandFunction: |-
+    (config) => ({
+      command: 'npx',
+      args: ['-y', '@vectros-ai/mcp-server'],
+      env: {
+        VECTROS_API_KEY: config.vectrosApiKey,
+        ...(config.apiBaseUrl ? { VECTROS_API_BASE_URL: config.apiBaseUrl } : {})
+      }
+    })
