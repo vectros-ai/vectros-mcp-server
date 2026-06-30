@@ -1,6 +1,6 @@
 {
   "name": "@vectros-ai/mcp-server",
-  "version": "0.5.2",
+  "version": "0.5.3",
   "mcpName": "io.github.vectros-ai/mcp-server",
   "description": "MCP server exposing Vectros hybrid search, structured records, and in-perimeter RAG/document-ask to MCP-aware desktop agents (Claude Desktop, Cursor, Code, Cline, Continue, VS Code).",
   "license": "Apache-2.0",
@@ -58,7 +58,7 @@
   "devDependencies": {
     "@eslint/js": "^9.39.4",
     "@types/node": "^20.0.0",
-    "@vectros-ai/sdk": "0.30.0-staging.fdb145d9",
+    "@vectros-ai/sdk": "0.31.0-staging.5c1b18a5",
     "eslint": "^9.39.4",
     "globals": "^15.14.0",
     "tsup": "^8.0.0",

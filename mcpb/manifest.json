@@ -2,7 +2,7 @@
   "manifest_version": "0.3",
   "name": "vectros",
   "display_name": "Vectros — Memory for Agents",
-  "version": "0.5.2",
+  "version": "0.5.3",
   "description": "Typed record store + hybrid search over MCP: deterministic lookups + semantic memory, per-customer.",
   "long_description": "Vectros is a typed, multi-tenant record store unified with hybrid search and citation-grounded RAG — deterministic lookups and enumeration AND semantic search over one isolated, per-customer index of records and documents, so an agent gets memory that's precise, not just fuzzy recall. It's reached agent-natively over MCP and human-natively through the Vectros app + SDKs. This extension connects Claude Desktop to your Vectros tenant through 21 data-plane tools (typed records, documents, hybrid search, and citation-grounded RAG). There are no web-search or scraping tools, by design.\n\nYou provide a least-privilege scoped key (ssk_...). Don't have one yet? Run `npx -y @vectros-ai/cli bootstrap` — it mints a scoped key and an AccessProfile for you (a one-time developer-portal sign-in is required).",
   "author": {

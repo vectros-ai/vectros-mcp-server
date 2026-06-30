@@ -290,11 +290,13 @@ const documentIngest: ToolFactory = ({ client, log, transport, ingestRoot }) => 
       if (text) {
         const storeText = (args.storeText as boolean | undefined) ?? true;
         const result = await client.documents.ingestDocument({
-          title,
-          text,
-          indexMode,
-          storeText,
-          ...common,
+          body: {
+            title,
+            text,
+            indexMode,
+            storeText,
+            ...common,
+          },
         });
         log.debug(
           { tool: 'document_ingest', mode: 'text', id: result?.id, indexMode },

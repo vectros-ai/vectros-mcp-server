@@ -3,6 +3,18 @@
 All notable changes to `@vectros-ai/mcp-server` are documented here.
 This project adheres to [Semantic Versioning](https://semver.org).
 
+## 0.5.3 — 2026-06-29
+
+SDK refresh. No tool, parameter, or result shapes changed.
+
+### Changed
+
+- Updated the bundled `@vectros-ai/sdk` to **0.31.0**, keeping the server aligned
+  with the current Vectros API (create endpoints now report whether a resource was
+  newly created and accept an opt-in `upsert`). The `record_create`, `folder_create`,
+  and `document_ingest` tools were adjusted to the regenerated client's request shape;
+  their MCP-facing inputs and outputs are unchanged.
+
 ## 0.5.2 — 2026-06-26
 
 Distribution fix + SDK refresh. No tool, parameter, or result shapes changed.

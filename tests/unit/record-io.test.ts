@@ -108,7 +108,8 @@ test('record_create passes typeName directly (no schemaId pre-fetch)', async () 
   );
   assert.ok(!r.isError, JSON.stringify(r));
   assert.equal(s.calls.find((c) => c.method === 'listSchemas'), undefined, 'no schema pre-fetch');
-  const create = s.calls.find((c) => c.method === 'createRecord')!.args as Record<string, unknown>;
+  // The request body nests under `body` (SDK 0.31 un-inlined it when `?upsert` was added).
+  const create = (s.calls.find((c) => c.method === 'createRecord')!.args as { body: Record<string, unknown> }).body;
   assert.equal(create.typeName, 'task');
   assert.equal(create.schemaId, undefined, 'no schemaId sent — the server resolves it from typeName');
   assert.deepEqual(create.payload, { title: 'Do it', status: 'todo' }, 'fields → payload');

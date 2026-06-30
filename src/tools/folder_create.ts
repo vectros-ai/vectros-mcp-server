@@ -38,13 +38,15 @@ const folderCreate: ToolFactory = ({ client, log }) => ({
   handler: async (args): Promise<ToolResult> => {
     try {
       const folder = await client.folders.createFolder({
-        name: args.name as string,
-        description: args.description as string | undefined,
-        parentFolderId: args.parentId as string | undefined,
-        slug: args.slug as string | undefined,
-        userId: args.userId as string | undefined,
-        orgId: args.orgId as string | undefined,
-        clientId: args.clientId as string | undefined,
+        body: {
+          name: args.name as string,
+          description: args.description as string | undefined,
+          parentFolderId: args.parentId as string | undefined,
+          slug: args.slug as string | undefined,
+          userId: args.userId as string | undefined,
+          orgId: args.orgId as string | undefined,
+          clientId: args.clientId as string | undefined,
+        },
       });
       log.debug({ tool: 'folder_create', id: folder.id, name: folder.name }, 'folder_create ok');
       return { content: [{ type: 'text', text: JSON.stringify(folder, null, 2) }] };

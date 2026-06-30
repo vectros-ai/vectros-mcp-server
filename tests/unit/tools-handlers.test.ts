@@ -959,7 +959,8 @@ test('document_ingest text mode calls ingestDocument with correct args + default
   const r = await tool.handler({ title: 'My Doc', text: 'Hello world.' }, {});
   assert.ok(!r.isError);
   assert.equal(s.calls.length, 1);
-  const a = s.calls[0].args as Record<string, unknown>;
+  // The request body nests under `body` (SDK 0.31 un-inlined it when `?upsert` was added).
+  const a = (s.calls[0].args as { body: Record<string, unknown> }).body;
   assert.equal(a.title, 'My Doc');
   assert.equal(a.text, 'Hello world.');
   assert.equal(a.indexMode, 'HYBRID', 'default indexMode is HYBRID');
@@ -992,7 +993,7 @@ test('document_ingest text mode passes through indexMode + storeText + ownership
     },
     {},
   );
-  const a = s.calls[0].args as Record<string, unknown>;
+  const a = (s.calls[0].args as { body: Record<string, unknown> }).body;
   assert.equal(a.indexMode, 'SEMANTIC');
   assert.equal(a.storeText, false);
   assert.equal(a.folderId, 'fld_1');
@@ -1443,7 +1444,8 @@ test('folder_create passes name/description + maps parentId→parentFolderId', a
     {},
   );
   assert.ok(!r.isError);
-  const a = s.calls[0].args as Record<string, unknown>;
+  // The request body nests under `body` (SDK 0.31 un-inlined it when `?upsert` was added).
+  const a = (s.calls[0].args as { body: Record<string, unknown> }).body;
   assert.equal(a.name, 'Reports');
   assert.equal(a.description, 'Q4');
   assert.equal(a.parentFolderId, 'root');
@@ -1651,9 +1653,10 @@ test('document_ingest keeps the legacy HYBRID default for an untyped doc, and ho
   } as never;
   const tool = documentIngest({ client, log });
   await tool.handler({ title: 'X', text: 'b' }, {}); // untyped, no indexMode
-  assert.equal((s.calls[0].args as Record<string, unknown>).indexMode, 'HYBRID');
+  // The request body nests under `body` (SDK 0.31 un-inlined it when `?upsert` was added).
+  assert.equal((s.calls[0].args as { body: Record<string, unknown> }).body.indexMode, 'HYBRID');
   await tool.handler({ title: 'X', text: 'b', indexMode: 'NONE' }, {}); // store-only
-  assert.equal((s.calls[1].args as Record<string, unknown>).indexMode, 'NONE');
+  assert.equal((s.calls[1].args as { body: Record<string, unknown> }).body.indexMode, 'NONE');
 });
 
 test('document_ingest surfaces a backend error message verbatim (error observability)', async () => {
@@ -1679,7 +1682,8 @@ test('record_create forwards indexMode (incl NONE) to createRecord', async () =>
   } as never;
   const tool = recordCreate({ client, log });
   await tool.handler({ type: 'task', fields: { a: 1 }, indexMode: 'NONE' }, {});
-  assert.equal((s.calls[0].args as Record<string, unknown>).indexMode, 'NONE');
+  // The request body nests under `body` (SDK 0.31 un-inlined it when `?upsert` was added).
+  assert.equal((s.calls[0].args as { body: Record<string, unknown> }).body.indexMode, 'NONE');
 });
 
 // ── record_query / document_query: order on lookups ──────────────────────────

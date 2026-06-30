@@ -64,15 +64,17 @@ const recordCreate: ToolFactory = ({ client, log }) => ({
       // The server resolves the schema from `typeName` — pass it directly, no
       // schemaId pre-fetch. An unknown type returns a clean 4xx from the API.
       const created = await client.records.createRecord({
-        typeName: type,
-        payload: args.fields as Record<string, unknown>,
-        externalId: args.externalId as string | undefined,
-        indexMode: args.indexMode as 'HYBRID' | 'SEMANTIC' | 'TEXT' | 'NONE' | undefined,
-        status: args.status as string | undefined,
-        folderId: args.folderId as string | undefined,
-        userId: args.userId as string | undefined,
-        orgId: args.orgId as string | undefined,
-        clientId: args.clientId as string | undefined,
+        body: {
+          typeName: type,
+          payload: args.fields as Record<string, unknown>,
+          externalId: args.externalId as string | undefined,
+          indexMode: args.indexMode as 'HYBRID' | 'SEMANTIC' | 'TEXT' | 'NONE' | undefined,
+          status: args.status as string | undefined,
+          folderId: args.folderId as string | undefined,
+          userId: args.userId as string | undefined,
+          orgId: args.orgId as string | undefined,
+          clientId: args.clientId as string | undefined,
+        },
       });
       log.debug({ tool: 'record_create', type, id: created.id }, 'record_create ok');
       return { content: [{ type: 'text', text: JSON.stringify(created, null, 2) }] };
