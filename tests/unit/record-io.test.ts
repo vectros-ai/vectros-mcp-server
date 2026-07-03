@@ -81,6 +81,65 @@ test('record_get surfaces SDK errors as isError', async () => {
   assert.match(r.content[0].text, /404/);
 });
 
+test('record_get resolves by externalId + type via lookup, then fetches by id (#543 finding 2)', async () => {
+  const s = spy();
+  const client = {
+    records: {
+      lookupRecordsByBody: async (args: unknown) => {
+        s.record('lookupRecordsByBody', args);
+        return { data: [{ id: 'rec_9', externalId: 'ctrl-scoped-key', payload: {} }] };
+      },
+      getRecord: async (args: unknown) => {
+        s.record('getRecord', args);
+        return { id: 'rec_9', typeName: 'control', payload: { rule: 'least privilege' } };
+      },
+    },
+  } as never;
+  const r = await recordGet({ client, log }).handler(
+    { externalId: 'ctrl-scoped-key', type: 'control' },
+    {},
+  );
+  assert.ok(!r.isError);
+  // Resolve step: externalId lookup routes through the POST-body lookup by field=externalId.
+  const lookup = s.calls.find((c) => c.method === 'lookupRecordsByBody')!.args as Record<string, unknown>;
+  assert.equal(lookup.type, 'control');
+  assert.equal(lookup.field, 'externalId');
+  assert.equal(lookup.value, 'ctrl-scoped-key');
+  // Then the internal id feeds getRecord for the full payload.
+  assert.deepEqual(s.calls.find((c) => c.method === 'getRecord')!.args, { id: 'rec_9' });
+  assert.equal((parsedText(r) as Record<string, unknown>).id, 'rec_9');
+});
+
+test('record_get errors (no SDK call) when neither id nor externalId is given', async () => {
+  const s = spy();
+  const client = {
+    records: {
+      getRecord: async (a: unknown) => (s.record('getRecord', a), {}),
+      lookupRecordsByBody: async (a: unknown) => (s.record('lookupRecordsByBody', a), { data: [] }),
+    },
+  } as never;
+  const r = await recordGet({ client, log }).handler({}, {});
+  assert.equal(r.isError, true);
+  assert.match(r.content[0].text, /Provide id, or externalId \+ type/);
+  assert.equal(s.calls.length, 0, 'no SDK call when the selector is missing');
+});
+
+test('record_get errors when externalId is given without type', async () => {
+  const client = { records: {} } as never;
+  const r = await recordGet({ client, log }).handler({ externalId: 'ext-1' }, {});
+  assert.equal(r.isError, true);
+  assert.match(r.content[0].text, /type is required when selecting by externalId/);
+});
+
+test('record_get errors when the externalId resolves to nothing', async () => {
+  const client = {
+    records: { lookupRecordsByBody: async () => ({ data: [] }) },
+  } as never;
+  const r = await recordGet({ client, log }).handler({ externalId: 'nope', type: 'control' }, {});
+  assert.equal(r.isError, true);
+  assert.match(r.content[0].text, /No record of type 'control' with externalId 'nope'/);
+});
+
 // ============================================================================
 // record_create
 // ============================================================================
@@ -201,6 +260,33 @@ test('record_update forwards expectedVersion + status; server enforces the confl
   const body = (s.calls[0].args as { body: Record<string, unknown> }).body;
   assert.equal(body.expectedVersion, 5, 'caller version forwarded for server-side optimistic concurrency');
   assert.equal(body.status, 'ARCHIVED', 'status forwarded when provided');
+});
+
+test('record_update resolves by externalId + type, then patches the resolved id (#543 finding 2)', async () => {
+  const s = spy();
+  const client = {
+    records: {
+      lookupRecordsByBody: async (args: unknown) => {
+        s.record('lookupRecordsByBody', args);
+        return { data: [{ id: 'rec_9', externalId: 'ctrl-scoped-key' }] };
+      },
+      patchRecord: async (args: unknown) => {
+        s.record('patchRecord', args);
+        return { id: 'rec_9', version: 3 };
+      },
+    },
+  } as never;
+  const r = await recordUpdate({ client, log }).handler(
+    { externalId: 'ctrl-scoped-key', type: 'control', fields: { rule: 'updated' } },
+    {},
+  );
+  assert.ok(!r.isError);
+  const lookup = s.calls.find((c) => c.method === 'lookupRecordsByBody')!.args as Record<string, unknown>;
+  assert.equal(lookup.field, 'externalId');
+  assert.equal(lookup.value, 'ctrl-scoped-key');
+  const patch = s.calls.find((c) => c.method === 'patchRecord')!.args as { id: string; body: Record<string, unknown> };
+  assert.equal(patch.id, 'rec_9', 'patch targets the resolved internal id');
+  assert.deepEqual(patch.body.payload, { rule: 'updated' });
 });
 
 // ============================================================================

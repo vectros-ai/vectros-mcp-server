@@ -13,6 +13,7 @@
 import { z } from 'zod';
 import type { ToolFactory, ToolResult } from './types.js';
 import { toolError } from './errors.js';
+import { resolveRecordIdByExternalId } from './resolve-external-id.js';
 
 // ~8k tokens; mirrors document_get's text cap.
 const MAX_PAYLOAD_CHARS = 32_000;
@@ -20,22 +21,38 @@ const MAX_PAYLOAD_CHARS = 32_000;
 const inputSchema = {
   id: z
     .string()
-    .min(1, 'id is required')
-    .describe('The Vectros record id (e.g. from record_query or hybrid_search).'),
+    .optional()
+    .describe('The Vectros record id (e.g. from record_query or hybrid_search). Provide this OR externalId+type.'),
+  externalId: z
+    .string()
+    .optional()
+    .describe(
+      'Your caller-owned externalId — an alternative selector to `id`. Requires `type` (externalId is unique ' +
+        'within a type). Resolves to the record without a manual record_query lookup first.',
+    ),
+  type: z
+    .string()
+    .optional()
+    .describe('Record type — REQUIRED when selecting by `externalId` (externalId is unique within a type).'),
 };
 
 const recordGet: ToolFactory = ({ client, log }) => ({
   name: 'record_get',
-  title: 'Get a record by id',
+  title: 'Get a record by id or externalId',
   description:
-    'Fetch a single structured record by its Vectros id, including the full payload. ' +
-    'Use after record_query / hybrid_search surfaces an id and you need the complete record. ' +
+    'Fetch a single structured record, including the full payload. Select it EITHER by its Vectros `id` ' +
+    '(e.g. from record_query / hybrid_search) OR by your own `externalId` + `type` — the same key you passed ' +
+    'to record_create, resolved for you (no manual record_query lookup needed). ' +
     'Very large payloads are truncated to protect the agent context window.',
   inputSchema,
   handler: async (args): Promise<ToolResult> => {
-    const id = args.id as string;
+    const id = args.id as string | undefined;
+    const externalId = args.externalId as string | undefined;
+    const type = args.type as string | undefined;
     try {
-      const record = await client.records.getRecord({ id });
+      const resolved = await resolveRecordIdByExternalId(client, { id, externalId, type });
+      if ('error' in resolved) return toolError('record_get', new Error(resolved.error));
+      const record = await client.records.getRecord({ id: resolved.id });
       const out: Record<string, unknown> = { ...record };
       if (record.payload !== undefined) {
         const json = JSON.stringify(record.payload);
@@ -51,12 +68,12 @@ const recordGet: ToolFactory = ({ client, log }) => ({
         }
       }
       log.debug(
-        { tool: 'record_get', id, truncated: out.payloadTruncated === true },
+        { tool: 'record_get', id: resolved.id, externalId, truncated: out.payloadTruncated === true },
         'record_get ok',
       );
       return { content: [{ type: 'text', text: JSON.stringify(out, null, 2) }] };
     } catch (err) {
-      log.warn({ tool: 'record_get', id, err: String(err) }, 'record_get failed');
+      log.warn({ tool: 'record_get', id, externalId, type, err: String(err) }, 'record_get failed');
       return toolError('record_get', err);
     }
   },

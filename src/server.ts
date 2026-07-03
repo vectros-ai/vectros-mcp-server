@@ -40,6 +40,29 @@ import { zodShapeToJsonSchema } from './zod-to-json-schema.js';
 
 const DEFAULT_ENVIRONMENT = 'https://api.vectros.ai';
 
+/**
+ * Format a zod validation failure into an agent-actionable message. An unknown
+ * top-level argument (the strict-mode `unrecognized_keys` issue) is called out by
+ * name alongside the tool's valid argument list — so a cold agent that invented an
+ * arg (e.g. a `filter` object) learns the offending key AND what it should have sent,
+ * instead of getting a wrong-but-plausible result. Other issues (missing required,
+ * wrong type) fall through to zod's own message.
+ */
+function formatArgError(tool: ToolDefinition, error: z.ZodError): string {
+  const unknownKeys = error.issues
+    .filter((i) => i.code === 'unrecognized_keys')
+    .flatMap((i) => (i as z.ZodIssue & { keys: string[] }).keys);
+  if (unknownKeys.length > 0) {
+    const valid = Object.keys(tool.inputSchema).join(', ');
+    return (
+      `Unknown argument(s): ${unknownKeys.join(', ')}. ` +
+      `Valid arguments for ${tool.name}: ${valid}. ` +
+      `Pass only these — an unrecognized argument is rejected, not ignored.`
+    );
+  }
+  return `Invalid arguments: ${error.message}`;
+}
+
 export interface VectrosMCPServerOptions {
   /** Vectros API key. REQUIRED. Recommended shape: ssk_live_... or ssk_test_.... */
   apiKey: string;
@@ -204,7 +227,11 @@ export class VectrosMCPServer {
           name: t.name,
           title: t.title,
           description: t.description,
-          inputSchema: zodShapeToJsonSchema(t.inputSchema),
+          // additionalProperties:false advertises strict argument validation to the
+          // MCP client (a well-behaved client rejects an unknown key before the call).
+          // The server enforces it too (z.object(...).strict() below) so a raw JSON-RPC
+          // call that skips client validation is still rejected — belt and suspenders.
+          inputSchema: { ...zodShapeToJsonSchema(t.inputSchema), additionalProperties: false },
         })),
       }) as unknown as never,
     );
@@ -215,10 +242,14 @@ export class VectrosMCPServer {
       if (!tool) {
         result = toolError(req.params.name ?? 'unknown', new Error('No such tool.'));
       } else {
-        // Validate args via zod.
-        const parsed = z.object(tool.inputSchema).safeParse(req.params.arguments ?? {});
+        // Validate args via zod. `.strict()` REJECTS unknown top-level keys instead of
+        // silently stripping them — closing the "silent wrong-results" class where an
+        // invented arg (e.g. `filter`) was dropped and a tool ran in an unintended mode
+        // (record_query fell through to list mode). A strict rejection self-corrects the
+        // agent immediately; a silent wrong result does not.
+        const parsed = z.object(tool.inputSchema).strict().safeParse(req.params.arguments ?? {});
         if (!parsed.success) {
-          result = toolError(tool.name, new Error(`Invalid arguments: ${parsed.error.message}`));
+          result = toolError(tool.name, new Error(formatArgError(tool, parsed.error)));
         } else {
           try {
             // The MCP SDK's `extra` object exposes sendNotification +

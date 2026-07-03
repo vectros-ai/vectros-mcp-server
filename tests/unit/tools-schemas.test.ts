@@ -180,14 +180,11 @@ test('document_get accepts includeText flag', () => {
   assert.ok(r.success);
 });
 
-test('document_get rejects missing documentId', () => {
-  const r = validate('document_get', { includeText: true });
-  assert.ok(!r.success);
-});
-
-test('document_get rejects empty documentId', () => {
-  const r = validate('document_get', { documentId: '' });
-  assert.ok(!r.success);
+test('document_get accepts the externalId + type selector (schema level)', () => {
+  // documentId and externalId are both optional at the schema level (either/or); the
+  // handler enforces that exactly one selector is supplied (see tools-handlers tests).
+  const r = validate('document_get', { externalId: 'ref-mr-workflow', type: 'reference' });
+  assert.ok(r.success);
 });
 
 test('document_get rejects non-boolean includeText', () => {
@@ -301,14 +298,24 @@ test('document_update accepts a patch', () => {
   assert.ok(r.success);
 });
 
-test('document_update rejects empty documentId', () => {
-  const r = validate('document_update', { documentId: '', fields: { a: 1 } });
-  assert.ok(!r.success);
+test('document_update accepts the externalId + type selector (schema level)', () => {
+  const r = validate('document_update', { externalId: 'ref-mr-workflow', type: 'reference', fields: { a: 1 } });
+  assert.ok(r.success);
 });
 
 test('document_update rejects non-integer expectedVersion', () => {
   const r = validate('document_update', { documentId: 'doc_1', expectedVersion: 1.5 });
   assert.ok(!r.success);
+});
+
+test('document_update accepts status ACTIVE / ARCHIVED (archive + restore)', () => {
+  assert.ok(validate('document_update', { documentId: 'doc_1', status: 'ARCHIVED' }).success);
+  assert.ok(validate('document_update', { documentId: 'doc_1', status: 'ACTIVE' }).success);
+});
+
+test('document_update rejects a status outside the enum (wrong value or casing)', () => {
+  assert.ok(!validate('document_update', { documentId: 'doc_1', status: 'DELETED' }).success);
+  assert.ok(!validate('document_update', { documentId: 'doc_1', status: 'archived' }).success);
 });
 
 // document_delete ---------------------------------------------------------

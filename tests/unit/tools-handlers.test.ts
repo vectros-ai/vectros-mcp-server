@@ -157,6 +157,136 @@ test('hybrid_search returns isError when SDK throws', async () => {
   assert.match(r.content[0].text, /upstream 503/);
 });
 
+// --- response ergonomics (#545) ---
+
+/** A hybrid_search client whose search.content returns a fixed result. */
+function searchClientReturning(result: unknown) {
+  return { search: { content: async () => result } } as never;
+}
+
+test('hybrid_search trims internal metadata, drops contextText by default, derives snippet', async () => {
+  const client = searchClientReturning({
+    results: [
+      {
+        documentId: 'd1',
+        score: 0.9,
+        textScore: 0.5,
+        semanticScore: 0.8,
+        chunkText: 'the matched chunk',
+        contextText: 'a much broader passage containing the matched chunk and then more',
+        snippet: null,
+        metadata: {
+          title: 'Doc',
+          category: 'legal',
+          tenantId: 't1',
+          owner_id: 'u1',
+          model_type: 'PartnerDocument',
+          rootFolderId: 'r1',
+          folderId: 'f1',
+        },
+      },
+    ],
+    totalResults: 1,
+    searchTimeMs: 5,
+  });
+  const tool = hybridSearch({ client, log });
+  const body = parsedText(await tool.handler({ query: 'q' }, {})) as {
+    results: Array<Record<string, unknown>>;
+  };
+  const hit = body.results[0];
+  assert.deepEqual(hit.metadata, { title: 'Doc', category: 'legal' }, 'internal keys stripped, caller keys kept');
+  assert.equal(hit.contextText, undefined, 'contextText omitted by default');
+  assert.equal(hit.chunkText, 'the matched chunk', 'matched chunk kept');
+  assert.equal(hit.snippet, 'the matched chunk', 'snippet derived from the chunk when server left it null');
+});
+
+test('hybrid_search includeContext:true keeps contextText and dedupes the contained chunkText', async () => {
+  const client = searchClientReturning({
+    results: [
+      {
+        documentId: 'd1',
+        chunkText: 'inner chunk',
+        contextText: 'outer passage with inner chunk inside',
+        metadata: {},
+      },
+    ],
+    totalResults: 1,
+    searchTimeMs: 1,
+  });
+  const tool = hybridSearch({ client, log });
+  const body = parsedText(await tool.handler({ query: 'q', includeContext: true }, {})) as {
+    results: Array<Record<string, unknown>>;
+  };
+  const hit = body.results[0];
+  assert.equal(hit.contextText, 'outer passage with inner chunk inside');
+  assert.equal(hit.chunkText, undefined, 'redundant chunkText dropped when contextText contains it');
+});
+
+test('hybrid_search flags textLegEmpty only when every hit scored 0 on the keyword leg', async () => {
+  const allZero = hybridSearch({
+    client: searchClientReturning({
+      results: [
+        { documentId: 'd1', textScore: 0 },
+        { documentId: 'd2', textScore: 0 },
+      ],
+      totalResults: 2,
+      searchTimeMs: 1,
+    }),
+    log,
+  });
+  const b1 = parsedText(await allZero.handler({ query: 'q' }, {})) as Record<string, unknown>;
+  assert.equal(b1.textLegEmpty, true);
+
+  const someNonZero = hybridSearch({
+    client: searchClientReturning({
+      results: [
+        { documentId: 'd1', textScore: 0 },
+        { documentId: 'd2', textScore: 0.4 },
+      ],
+      totalResults: 2,
+      searchTimeMs: 1,
+    }),
+    log,
+  });
+  const b2 = parsedText(await someNonZero.handler({ query: 'q' }, {})) as Record<string, unknown>;
+  assert.equal(b2.textLegEmpty, undefined, 'not flagged when the keyword leg contributed to any hit');
+});
+
+test('hybrid_search does not flag textLegEmpty in SEMANTIC mode', async () => {
+  const tool = hybridSearch({
+    client: searchClientReturning({
+      results: [{ documentId: 'd1', textScore: 0 }],
+      totalResults: 1,
+      searchTimeMs: 1,
+    }),
+    log,
+  });
+  const body = parsedText(await tool.handler({ query: 'q', mode: 'SEMANTIC' }, {})) as Record<string, unknown>;
+  assert.equal(body.textLegEmpty, undefined, 'SEMANTIC mode has no keyword leg to flag');
+});
+
+test('hybrid_search enforces a per-response byte budget and flags truncation', async () => {
+  const big = 'x'.repeat(20_000);
+  const client = searchClientReturning({
+    results: [
+      { documentId: 'd1', chunkText: big, textScore: 0.5 },
+      { documentId: 'd2', chunkText: big, textScore: 0.4 },
+      { documentId: 'd3', chunkText: big, textScore: 0.3 },
+    ],
+    totalResults: 3,
+    searchTimeMs: 1,
+  });
+  const tool = hybridSearch({ client, log });
+  const body = parsedText(await tool.handler({ query: 'q' }, {})) as {
+    results: unknown[];
+    truncated?: boolean;
+    returnedResults?: number;
+  };
+  assert.ok(body.results.length < 3, 'oversized result trimmed from the least-relevant tail');
+  assert.equal(body.truncated, true);
+  assert.equal(body.returnedResults, body.results.length);
+});
+
 // ============================================================================
 // record_query — mode auto-selection
 // ============================================================================
@@ -635,7 +765,7 @@ test('document_get without includeText returns metadata only (one SDK call)', as
     documents: {
       getDocument: async (args: unknown) => {
         s.record('getDocument', args);
-        return { id: 'doc_1', title: 'Hello', status: 'INDEXED' };
+        return { id: 'doc_1', title: 'Hello', status: 'ACTIVE', indexStatus: 'INDEXED' };
       },
       getDocumentText: async () => {
         s.record('getDocumentText', null);
@@ -654,6 +784,22 @@ test('document_get without includeText returns metadata only (one SDK call)', as
   assert.equal(body.id, 'doc_1');
   assert.equal(body.text, undefined, 'no text field when includeText false');
   assert.equal(body.textAvailable, undefined);
+});
+
+test('document_get passes lifecycle status + indexStatus through untouched', async () => {
+  const client = {
+    documents: {
+      // An archived document that finished indexing before it was retracted —
+      // the two status axes are independent and BOTH must reach the agent.
+      getDocument: async () => ({ id: 'doc_1', status: 'ARCHIVED', indexStatus: 'INDEXED' }),
+    },
+  } as never;
+  const tool = documentGet({ client, log });
+  const r = await tool.handler({ documentId: 'doc_1' }, {});
+  assert.ok(!r.isError);
+  const body = parsedText(r) as Record<string, unknown>;
+  assert.equal(body.status, 'ARCHIVED', 'caller lifecycle status surfaced');
+  assert.equal(body.indexStatus, 'INDEXED', 'processing status surfaced alongside it');
 });
 
 test('document_get with includeText:true fetches both metadata + text', async () => {
@@ -700,7 +846,7 @@ test('document_get with includeText truncates text > 32k chars', async () => {
 test('document_get with includeText gracefully handles getText 404 (storeText not set)', async () => {
   const client = {
     documents: {
-      getDocument: async () => ({ id: 'doc_1', status: 'INDEXED' }),
+      getDocument: async () => ({ id: 'doc_1', status: 'ACTIVE', indexStatus: 'INDEXED' }),
       getDocumentText: async () => {
         const e = new Error('document text not stored') as Error & { statusCode: number };
         e.statusCode = 404;
@@ -951,7 +1097,7 @@ test('document_ingest text mode calls ingestDocument with correct args + default
     documents: {
       ingestDocument: async (args: unknown) => {
         s.record('ingestDocument', args);
-        return { id: 'doc_new', title: 'T', status: 'PENDING_INDEX' };
+        return { id: 'doc_new', title: 'T', status: 'ACTIVE', indexStatus: 'PENDING_INDEX' };
       },
     },
   } as never;
@@ -1006,6 +1152,55 @@ test('document_ingest text mode passes through indexMode + storeText + ownership
   assert.equal(a.metadata, undefined, 'no stale metadata key on the wire');
 });
 
+test('document_ingest text mode passes upsert as the top-level request flag (re-sync primitive)', async () => {
+  const s = spy();
+  const client = {
+    documents: {
+      ingestDocument: async (args: unknown) => {
+        s.record('ingestDocument', args);
+        return { id: 'doc1', created: false };
+      },
+    },
+  } as never;
+  const tool = documentIngest({ client, log });
+  await tool.handler({ title: 'T', text: 'edited body', externalId: 'ext-1', schemaId: 'sch_1', upsert: true }, {});
+  // upsert rides at the request top level (NOT inside body — the SDK un-inlined it as a query param).
+  const req = s.calls[0].args as { upsert?: boolean; body: Record<string, unknown> };
+  assert.equal(req.upsert, true, 'upsert forwarded at the top level');
+  assert.equal(req.body.text, 'edited body');
+  assert.equal(req.body.externalId, 'ext-1');
+  assert.equal(req.body.schemaId, 'sch_1', 'schemaId re-supplied so externalId resolves in the typed namespace');
+});
+
+test('document_ingest file mode passes upsert to uploadDocument', async () => {
+  const s = spy();
+  const client = {
+    documents: {
+      uploadDocument: async (args: unknown) => {
+        s.record('uploadDocument', args);
+        return { id: 'doc1', uploadUrl: 'https://x/y', created: false };
+      },
+    },
+  } as never;
+  const tmp = join(tmpdir(), `mcp-upsert-${process.pid}.txt`);
+  await writeFile(tmp, 'file bytes');
+  try {
+    const tool = documentIngest({ client, log, ingestRoot: tmpdir() });
+    // PUT to the presigned URL is stubbed by the global fetch mock in this suite's setup.
+    const origFetch = globalThis.fetch;
+    globalThis.fetch = (async () => ({ ok: true, status: 200, text: async () => '' })) as never;
+    try {
+      await tool.handler({ title: 'F', filePath: basename(tmp), externalId: 'ext-2', upsert: true }, {});
+    } finally {
+      globalThis.fetch = origFetch;
+    }
+    const req = s.calls.find((c) => c.method === 'uploadDocument')!.args as { upsert?: boolean };
+    assert.equal(req.upsert, true, 'upsert forwarded to uploadDocument (file-mode re-sync)');
+  } finally {
+    await unlink(tmp);
+  }
+});
+
 test('document_ingest rejects when neither text nor filePath given', async () => {
   const tool = documentIngest({ client: {} as never, log });
   const r = await tool.handler({ title: 'X' }, {});
@@ -1032,7 +1227,7 @@ test('document_ingest rejects filePath on HTTP transport with actionable message
   assert.match(r.content[0].text, /text.*mode|uploadDocument/, 'mentions workaround');
 });
 
-test('document_ingest file mode reads + uploads + returns PENDING_INDEX', async () => {
+test('document_ingest file mode reads + uploads + returns indexStatus PENDING_INDEX', async () => {
   // Real temp file for the fs.readFile path.
   const tmpFile = join(tmpdir(), `mcp-ingest-test-${process.pid}.txt`);
   await writeFile(tmpFile, 'file body bytes');
@@ -1051,7 +1246,13 @@ test('document_ingest file mode reads + uploads + returns PENDING_INDEX', async 
       documents: {
         uploadDocument: async (args: unknown) => {
           sdkCalls.push({ method: 'uploadDocument', args });
-          return { id: 'doc_uploaded', uploadUrl: 'https://s3.example/presigned?sig=x', expiresAt: '2026-01-01T00:00:00Z' };
+          return {
+            id: 'doc_uploaded',
+            uploadUrl: 'https://s3.example/presigned?sig=x',
+            expiresAt: '2026-01-01T00:00:00Z',
+            status: 'ACTIVE',
+            indexStatus: 'PENDING_UPLOAD',
+          };
         },
       },
     } as never;
@@ -1074,10 +1275,12 @@ test('document_ingest file mode reads + uploads + returns PENDING_INDEX', async 
     assert.equal(headers['Content-Type'], 'text/plain');
     assert.equal(headers.Authorization, undefined, 'no auth on presigned PUT');
 
-    // Response surfaces PENDING_INDEX + polling note.
+    // Response surfaces indexStatus PENDING_INDEX (the stale pre-PUT
+    // PENDING_UPLOAD overridden) + polling note; lifecycle status untouched.
     const body = parsedText(r) as Record<string, unknown>;
     assert.equal(body.id, 'doc_uploaded');
-    assert.equal(body.status, 'PENDING_INDEX');
+    assert.equal(body.indexStatus, 'PENDING_INDEX');
+    assert.equal(body.status, 'ACTIVE', 'lifecycle status passes through, not clobbered');
     assert.match(String(body._note), /Poll document_get/);
   } finally {
     globalThis.fetch = originalFetch;
@@ -1277,6 +1480,26 @@ test('document_update forwards title/folderId/ownership; omits payload when no f
   assert.equal(upd.body.payload, undefined, 'no fields → payload omitted (preserved, not wiped)');
 });
 
+test('document_update forwards text (in-place body re-index) and omits it when absent', async () => {
+  const s = spy();
+  const client = {
+    documents: {
+      patchDocument: async (args: unknown) => {
+        s.record('patchDocument', args);
+        return { id: 'doc1', version: 5 };
+      },
+    },
+  } as never;
+  const tool = documentUpdate({ client, log });
+  await tool.handler({ documentId: 'doc1', text: 'freshly edited body' }, {});
+  const withText = s.calls[0].args as { body: Record<string, unknown> };
+  assert.equal(withText.body.text, 'freshly edited body', 'text forwarded to re-ingest the body');
+
+  await tool.handler({ documentId: 'doc1', fields: { a: 1 } }, {});
+  const noText = s.calls[1].args as { body: Record<string, unknown> };
+  assert.equal(noText.body.text, undefined, 'text omitted when not supplied (stored text preserved)');
+});
+
 test('document_update forwards a null payload field (merge-patch key deletion)', async () => {
   const s = spy();
   const client = {
@@ -1313,6 +1536,61 @@ test('document_update forwards expectedVersion; server enforces the conflict (40
   assert.match(r.content[0].text, /409|conflict/i);
   const upd = s.calls[0].args as { body: Record<string, unknown> };
   assert.equal(upd.body.expectedVersion, 5, 'caller version forwarded for server-side optimistic concurrency');
+});
+
+test('document_update forwards status (archive → restore) and omits it when absent', async () => {
+  const s = spy();
+  const client = {
+    documents: {
+      patchDocument: async (args: unknown) => {
+        s.record('patchDocument', args);
+        const { body } = args as { body: Record<string, unknown> };
+        return { id: 'doc1', status: body.status ?? 'ACTIVE', version: 6 };
+      },
+    },
+  } as never;
+  const tool = documentUpdate({ client, log });
+
+  const r = await tool.handler({ documentId: 'doc1', status: 'ARCHIVED' }, {});
+  assert.ok(!r.isError);
+  const archived = s.calls[0].args as { body: Record<string, unknown> };
+  assert.equal(archived.body.status, 'ARCHIVED', 'archive forwarded as the lifecycle status');
+  assert.match(r.content[0].text, /"status": "ARCHIVED"/, 'updated status surfaced in the tool result');
+
+  await tool.handler({ documentId: 'doc1', status: 'ACTIVE' }, {});
+  const restored = s.calls[1].args as { body: Record<string, unknown> };
+  assert.equal(restored.body.status, 'ACTIVE', 'restore forwarded');
+
+  await tool.handler({ documentId: 'doc1', fields: { a: 1 } }, {});
+  const noStatus = s.calls[2].args as { body: Record<string, unknown> };
+  assert.equal(noStatus.body.status, undefined, 'status omitted when not supplied (lifecycle preserved)');
+});
+
+test('document_update archives via the externalId+type selector, combined with text + expectedVersion', async () => {
+  const s = spy();
+  const client = {
+    documents: {
+      lookupDocumentsByBody: async (args: unknown) => {
+        s.record('lookupDocumentsByBody', args);
+        return { data: [{ id: 'doc_resolved' }] };
+      },
+      patchDocument: async (args: unknown) => {
+        s.record('patchDocument', args);
+        return { id: 'doc_resolved', status: 'ARCHIVED', version: 3 };
+      },
+    },
+  } as never;
+  const tool = documentUpdate({ client, log });
+  const r = await tool.handler(
+    { externalId: 'kb-note-1', type: 'note', status: 'ARCHIVED', text: 'final body', expectedVersion: 2 },
+    {},
+  );
+  assert.ok(!r.isError);
+  const upd = s.calls.find((c) => c.method === 'patchDocument')!.args as { id: string; body: Record<string, unknown> };
+  assert.equal(upd.id, 'doc_resolved', 'externalId+type resolved to the document id');
+  assert.equal(upd.body.status, 'ARCHIVED', 'status rides the same merge-patch as the other changes');
+  assert.equal(upd.body.text, 'final body');
+  assert.equal(upd.body.expectedVersion, 2);
 });
 
 test('document_update returns isError when SDK throws', async () => {

@@ -55,6 +55,21 @@ developer portal. The command then:
 Restart your MCP client and you're done. It's idempotent (re-run any time);
 `--rotate` replaces this machine's key.
 
+**Want to browse the data yourself?** `bootstrap` sets up the key for your
+*agent*, not a login for *you* — so a blueprint's context won't appear in the
+data-plane app's switcher until you join your own user to it (the app lists only
+contexts your user has access in). Grant yourself a role once, either in the admin
+app (**Access → Contexts → _your context_ → Profiles → Create profile**, pick
+yourself from the by-email picker, choose a role — no raw id needed) or from the
+CLI with `--principal me` (resolves to your own user):
+
+```bash
+vectros access grant --principal me --context <context-id> --role <role>
+```
+
+Blueprints that ship a human role (e.g. `agentic-sdlc`'s `editor`) let you use
+`--role`; otherwise grant inline scopes with `--actions records:r,search:r,…`.
+
 For scripted / agent use, set the sign-in token in the environment and skip
 the prompts:
 
@@ -181,8 +196,8 @@ available.
 |---|---|
 | `document_ingest` | Create a document — inline text body OR local file upload (file mode is stdio-transport only). Idempotent by `externalId`; optional `schemaId` + `payload` for a typed, lookup-queryable document. |
 | `document_query` | Query documents by lookup field (equality / range / prefix, with `asc`/`desc` ordering) or list mode (filter by ownership + type). |
-| `document_get` | Fetch a document by id (metadata; optional text truncated at ~8K tokens; optional presigned `downloadUrl` for file-backed documents). |
-| `document_update` | Patch a document's metadata / typed payload (deep-merged); optimistic concurrency via `expectedVersion`. |
+| `document_get` | Fetch a document by id (metadata incl. lifecycle `status` + processing `indexStatus`; optional text truncated at ~8K tokens; optional presigned `downloadUrl` for file-backed documents). |
+| `document_update` | Patch a document's metadata / typed payload (deep-merged); archive/restore via `status` (`ARCHIVED` soft-retracts from search, `ACTIVE` restores); optimistic concurrency via `expectedVersion`. |
 | `document_delete` | Permanently delete a document by id (removes it and its indexed content). |
 
 **Folders** (group records + documents)

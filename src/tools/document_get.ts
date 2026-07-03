@@ -23,6 +23,7 @@
 import { z } from 'zod';
 import type { ToolFactory, ToolResult } from './types.js';
 import { toolError } from './errors.js';
+import { resolveDocumentIdByExternalId } from './resolve-external-id.js';
 
 // ~8K tokens at 4 chars/token (rough English heuristic). Conservative
 // — better to truncate slightly early than to blow past an agent's
@@ -32,8 +33,19 @@ const MAX_TEXT_CHARS = 32_000;
 const inputSchema = {
   documentId: z
     .string()
-    .min(1, 'documentId is required')
-    .describe('The document ID returned by document_ingest or hybrid_search.'),
+    .optional()
+    .describe('The document ID returned by document_ingest or hybrid_search. Provide this OR externalId+type.'),
+  externalId: z
+    .string()
+    .optional()
+    .describe(
+      'Your caller-owned externalId — an alternative selector to `documentId` (requires `type`). Fetches the ' +
+        'document you ingested under that externalId without a manual lookup first.',
+    ),
+  type: z
+    .string()
+    .optional()
+    .describe('Document type — REQUIRED when selecting by `externalId` (externalId is unique within a type).'),
   includeText: z
     .boolean()
     .optional()
@@ -72,19 +84,26 @@ const documentGet: ToolFactory = ({ client, log }) => ({
   name: 'document_get',
   title: 'Get document metadata (and optionally text)',
   description:
-    'Fetch metadata for a single document by id. Pass `includeText: true` to also fetch the text body ' +
+    'Fetch metadata for a single document — select it by its Vectros `documentId` OR by your own ' +
+    '`externalId` + `type` (resolved for you). Pass `includeText: true` to also fetch the text body ' +
     '(capped at ~8K tokens; `truncated: true` flag if cut). If the document was ingested without ' +
     '`storeText: true`, text is unavailable — `textAvailable: false` flag is set and the agent should ' +
     'use `document_ask` for question-driven extraction instead. Pass `includeDownloadUrl: true` to also ' +
     'get a short-lived presigned `downloadUrl` for the original file (file-backed documents only). ' +
-    'Returns full DocumentResponse from the SDK.',
+    'Returns the full document metadata, including its lifecycle `status` (ACTIVE, or ARCHIVED when ' +
+    'soft-retracted from search — restorable via document_update) and its processing `indexStatus`.',
   inputSchema,
   handler: async (args): Promise<ToolResult> => {
-    const id = args.documentId as string;
+    const documentId = args.documentId as string | undefined;
+    const externalId = args.externalId as string | undefined;
+    const type = args.type as string | undefined;
     const includeText = (args.includeText as boolean | undefined) ?? false;
     const includeDownloadUrl = (args.includeDownloadUrl as boolean | undefined) ?? false;
 
     try {
+      const resolved = await resolveDocumentIdByExternalId(client, { id: documentId, externalId, type });
+      if ('error' in resolved) return toolError('document_get', new Error(resolved.error));
+      const id = resolved.id;
       const doc = await client.documents.getDocument({ id });
 
       let extra: Record<string, unknown> = {};
@@ -137,7 +156,7 @@ const documentGet: ToolFactory = ({ client, log }) => ({
         ],
       };
     } catch (err) {
-      log.warn({ tool: 'document_get', id, err: String(err) }, 'document_get failed');
+      log.warn({ tool: 'document_get', documentId, externalId, type, err: String(err) }, 'document_get failed');
       return toolError('document_get', err);
     }
   },

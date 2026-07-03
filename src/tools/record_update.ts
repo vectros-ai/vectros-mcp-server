@@ -18,9 +18,24 @@ import { z } from 'zod';
 import type { Vectros } from '@vectros-ai/sdk';
 import type { ToolFactory, ToolResult } from './types.js';
 import { toolError } from './errors.js';
+import { resolveRecordIdByExternalId } from './resolve-external-id.js';
 
 const inputSchema = {
-  id: z.string().min(1, 'id is required').describe('The Vectros record id to update.'),
+  id: z
+    .string()
+    .optional()
+    .describe('The Vectros record id to update. Provide this OR externalId+type.'),
+  externalId: z
+    .string()
+    .optional()
+    .describe(
+      'Your caller-owned externalId — an alternative selector to `id` (requires `type`). Updates the record ' +
+        'you created under that externalId without a manual record_query lookup first.',
+    ),
+  type: z
+    .string()
+    .optional()
+    .describe('Record type — REQUIRED when selecting by `externalId` (externalId is unique within a type).'),
   fields: z
     .record(z.string(), z.unknown())
     .describe(
@@ -43,30 +58,35 @@ const inputSchema = {
 
 const recordUpdate: ToolFactory = ({ client, log }) => ({
   name: 'record_update',
-  title: 'Update a record',
+  title: 'Update a record by id or externalId',
   description:
-    'Update a record by id. The provided `fields` are DEEP-MERGED into the existing payload (unspecified ' +
-    'fields are preserved; a field set to `null` is deleted). Pass `expectedVersion` (the version you last ' +
-    'read) for safe concurrent edits — a stale update is refused (409). Use `status` to archive without ' +
-    'deleting. Requires the key to allow records:u.',
+    'Update a record — select it by its Vectros `id` OR by your own `externalId` + `type` (the same key you ' +
+    'passed to record_create, resolved for you). The provided `fields` are DEEP-MERGED into the existing ' +
+    'payload (unspecified fields are preserved; a field set to `null` is deleted). Pass `expectedVersion` ' +
+    '(the version you last read) for safe concurrent edits — a stale update is refused (409). Use `status` ' +
+    'to archive without deleting. Requires the key to allow records:u.',
   inputSchema,
   handler: async (args): Promise<ToolResult> => {
-    const id = args.id as string;
+    const id = args.id as string | undefined;
+    const externalId = args.externalId as string | undefined;
+    const type = args.type as string | undefined;
     const fields = args.fields as Record<string, unknown>;
     const status = args.status as string | undefined;
     const expectedVersion = args.expectedVersion as number | undefined;
     try {
+      const resolved = await resolveRecordIdByExternalId(client, { id, externalId, type });
+      if ('error' in resolved) return toolError('record_update', new Error(resolved.error));
       // RFC-7386 merge-patch: send only what's changing. typeName/schemaId are
       // immutable and rejected if present, so they are intentionally omitted.
       const body: Vectros.RecordRequest = { payload: fields };
       if (status !== undefined) body.status = status;
       if (expectedVersion !== undefined) body.expectedVersion = expectedVersion;
 
-      const updated = await client.records.patchRecord({ id, body });
-      log.debug({ tool: 'record_update', id }, 'record_update ok');
+      const updated = await client.records.patchRecord({ id: resolved.id, body });
+      log.debug({ tool: 'record_update', id: resolved.id, externalId }, 'record_update ok');
       return { content: [{ type: 'text', text: JSON.stringify(updated, null, 2) }] };
     } catch (err) {
-      log.warn({ tool: 'record_update', id, err: String(err) }, 'record_update failed');
+      log.warn({ tool: 'record_update', id, externalId, type, err: String(err) }, 'record_update failed');
       return toolError('record_update', err);
     }
   },

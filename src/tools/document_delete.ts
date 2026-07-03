@@ -19,7 +19,8 @@ const documentDelete: ToolFactory = ({ client, log }) => ({
   title: 'Delete a document',
   description:
     'Permanently delete a document by id (removes it and its indexed content). Requires the key to allow ' +
-    'documents:d — a key without it gets a permission error.',
+    'documents:d — a key without it gets a permission error. To archive without deleting, use ' +
+    'document_update to set status: "ARCHIVED" instead (recoverable, and needs no delete authority).',
   inputSchema,
   handler: async (args): Promise<ToolResult> => {
     const documentId = args.documentId as string;

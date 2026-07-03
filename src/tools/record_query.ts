@@ -41,7 +41,11 @@ const inputSchema = {
   field: z
     .string()
     .optional()
-    .describe('Lookup mode: name of the lookup-indexed field to query by.'),
+    .describe(
+      'Lookup mode: name of the lookup-indexed field to query by. `externalId` is always queryable — ' +
+        'e.g. `{type:"control", field:"externalId", value:"ctrl-scoped-key"}` finds the record you created ' +
+        'under that externalId. (record_get / record_update also accept externalId directly.)',
+    ),
   value: z.string().optional().describe('Lookup mode (equality): exact-match value for `field`.'),
   from: z
     .string()

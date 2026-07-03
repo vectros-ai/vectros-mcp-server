@@ -20,6 +20,47 @@ import { toolError } from './errors.js';
 
 const MCP_DEFAULT_LIMIT = 3;
 const MCP_MAX_LIMIT = 10;
+// Keep a single tool-result well under a typical MCP client's result cap so one search can't blow the
+// agent's context window. contextText (the broad passage per hit) is the heavy part and is omitted by
+// default (opt in with includeContext); this budget is the backstop for everything else. Measured as
+// serialized-string LENGTH (JS UTF-16 code units) — an approximation of bytes, deliberately conservative
+// (it's a soft backstop, not an exact limit).
+const MCP_RESPONSE_CHAR_BUDGET = 24_000;
+const SNIPPET_MAX_CHARS = 160;
+// Search-index bookkeeping keys that repeat on every hit and carry no agent value — stripped from the
+// MCP payload so they don't crowd the context. The caller's own ingested metadata is always kept.
+const INTERNAL_METADATA_KEYS = new Set(['tenantId', 'owner_id', 'model_type', 'rootFolderId', 'folderId']);
+
+/** Drop internal search-index bookkeeping keys from a hit's metadata, preserving caller-supplied fields. */
+function trimMetadata(md: unknown): unknown {
+  if (!md || typeof md !== 'object' || Array.isArray(md)) return md;
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(md as Record<string, unknown>)) {
+    if (!INTERNAL_METADATA_KEYS.has(k)) out[k] = v;
+  }
+  return out;
+}
+
+/**
+ * Reshape one search hit for agent consumption: trim internal metadata; omit the heavy
+ * contextText unless opted in (and, when included, drop the now-redundant chunkText it already
+ * contains); and populate the agent-sized snippet from the matched chunk when the server left it empty.
+ */
+function reshapeHit(hit: Record<string, unknown>, includeContext: boolean): Record<string, unknown> {
+  const out: Record<string, unknown> = { ...hit };
+  if ('metadata' in out) out.metadata = trimMetadata(out.metadata);
+  const chunk = typeof hit.chunkText === 'string' ? hit.chunkText : undefined;
+  const ctx = typeof hit.contextText === 'string' ? hit.contextText : undefined;
+  if (includeContext) {
+    if (chunk && ctx && ctx.includes(chunk)) delete out.chunkText; // dedupe: send only the container
+  } else {
+    delete out.contextText; // compact default — the matched chunk is the retrieval unit
+  }
+  if ((out.snippet == null || out.snippet === '') && chunk) {
+    out.snippet = chunk.length > SNIPPET_MAX_CHARS ? chunk.slice(0, SNIPPET_MAX_CHARS) + '…' : chunk;
+  }
+  return out;
+}
 
 const inputSchema = {
   query: z.string().min(1, 'query must be non-empty').describe('Natural-language or keyword query.'),
@@ -59,7 +100,10 @@ const inputSchema = {
   typeName: z
     .string()
     .optional()
-    .describe('Restrict record hits to this schema type (e.g. "patient"). No-op for documents.'),
+    .describe(
+      'Restrict hits to this schema type (e.g. "patient", "runbook"). Applies to BOTH documents and ' +
+        'records — combine with contentTypes to scope within one content type. Untyped content never matches.',
+    ),
   filters: z
     .record(z.unknown())
     .optional()
@@ -98,6 +142,14 @@ const inputSchema = {
     .boolean()
     .optional()
     .describe('When true, return at most one chunk per source document.'),
+  includeContext: z
+    .boolean()
+    .optional()
+    .describe(
+      'Include the broader passage (contextText) around each matched chunk. Off by default to keep the ' +
+        'result compact — each hit returns its matched chunkText plus a short snippet. Turn this on only ' +
+        'when you need more surrounding context inline; for a full deep read, fetch the source with document_get.',
+    ),
   requireComplete: z
     .boolean()
     .optional()
@@ -116,7 +168,11 @@ const hybridSearch: ToolFactory = ({ client, log }) => ({
     'Narrow with contentTypes/typeName/filters, ownership (userId/orgId/clientId), folder scope, a created date window, ' +
     'keyword precision (textMode OR/AND/PHRASE), relevance floors (minSimilarity/minTextRelevance), uniqueDocuments, ' +
     'and requireComplete (fail closed on a degraded backend). Tenant-isolated; the caller\'s scoped key fully ' +
-    'constrains which content is visible.',
+    'constrains which content is visible. ARCHIVED (soft-retracted) documents never appear in results — fetch ' +
+    'them by id via document_get, or restore them via document_update. To stay within the agent context window each hit returns its matched ' +
+    'chunkText + a short snippet by default; set includeContext:true for the broader surrounding passage. If the ' +
+    'whole result would be too large it is truncated to the top hits (truncated:true). textLegEmpty:true flags that ' +
+    'the keyword leg matched nothing (all textScores 0) — usually a too-long PHRASE query; retry with textMode:"OR".',
   inputSchema,
   handler: async (args): Promise<ToolResult> => {
     const limit = (args.limit as number | undefined) ?? MCP_DEFAULT_LIMIT;
@@ -143,13 +199,44 @@ const hybridSearch: ToolFactory = ({ client, log }) => ({
         uniqueDocuments: args.uniqueDocuments as boolean | undefined,
         requireComplete: args.requireComplete as boolean | undefined,
       });
+      const hits: Array<Record<string, unknown>> = Array.isArray(
+        (result as { results?: unknown }).results,
+      )
+        ? (result as { results: Array<Record<string, unknown>> }).results
+        : [];
+      const includeContext = (args.includeContext as boolean | undefined) ?? false;
+      let shaped = hits.map((h) => reshapeHit(h, includeContext));
+
+      // Keyword-leg diagnostic: in a HYBRID/TEXT search, if every hit scored 0 on the BM25
+      // (keyword) leg, that leg contributed nothing — a common trap when a long natural-language query
+      // runs under the PHRASE default. Flag it so the agent can re-shape the query or switch textMode
+      // rather than silently trusting a semantic-only ranking.
+      const textLegEmpty =
+        mode !== 'SEMANTIC' && hits.length > 0 && hits.every((h) => !(Number(h.textScore) > 0));
+
+      const envelope: Record<string, unknown> = {
+        ...(result as Record<string, unknown>),
+        results: shaped,
+      };
+      if (textLegEmpty) envelope.textLegEmpty = true;
+
+      // Per-response size budget: a single search must not overflow the agent's context window.
+      // Drop hits from the least-relevant tail until the serialized result fits, flagging the truncation
+      // (mirrors the `degraded` signal). Keeps at least the top hit.
+      let text = JSON.stringify(envelope, null, 2);
+      while (shaped.length > 1 && text.length > MCP_RESPONSE_CHAR_BUDGET) {
+        shaped = shaped.slice(0, -1);
+        envelope.results = shaped;
+        envelope.truncated = true;
+        envelope.returnedResults = shaped.length;
+        text = JSON.stringify(envelope, null, 2);
+      }
+
       log.debug(
-        { tool: 'hybrid_search', mode, limit, returned: result.results?.length },
+        { tool: 'hybrid_search', mode, limit, returned: shaped.length, textLegEmpty },
         'hybrid_search ok',
       );
-      return {
-        content: [{ type: 'text', text: JSON.stringify(result, null, 2) }],
-      };
+      return { content: [{ type: 'text', text }] };
     } catch (err) {
       log.warn({ tool: 'hybrid_search', err: String(err) }, 'hybrid_search failed');
       return toolError('hybrid_search', err);

@@ -123,12 +123,25 @@ test('tools/call dispatch fails closed: unknown tool + invalid args (no SDK call
     assert.equal(unknown.isError, true, 'unknown tool → isError');
     assert.match(JSON.stringify(unknown.content), /No such tool/);
 
-    // record_get requires a non-empty `id`; `{}` fails zod BEFORE any SDK call.
+    // record_query requires a non-empty `type`; `{}` fails zod BEFORE any SDK call.
     // The 'Invalid arguments' message (not a network error against the fake key)
     // proves the request→validate→reject path short-circuits the dispatch.
-    const badArgs = await client.callTool({ name: 'record_get', arguments: {} });
+    const badArgs = await client.callTool({ name: 'record_query', arguments: {} });
     assert.equal(badArgs.isError, true, 'invalid args → isError');
     assert.match(JSON.stringify(badArgs.content), /Invalid arguments/);
+
+    // #543 finding 1 (the highest-severity cold-agent trap): an INVENTED top-level arg
+    // must ERROR, not silently fall through to a default mode. Before strict validation,
+    // `record_query {type, filter:{…}}` dropped `filter` and ran in list mode, returning
+    // wrong-but-plausible results. Now it is rejected, naming the offending key + the
+    // valid argument list so the agent self-corrects.
+    const strayArg = await client.callTool({
+      name: 'record_query',
+      arguments: { type: 'control', filter: { externalId: 'x' } },
+    });
+    assert.equal(strayArg.isError, true, 'unknown arg → isError (no silent list-mode fallthrough)');
+    assert.match(JSON.stringify(strayArg.content), /Unknown argument\(s\): filter/);
+    assert.match(JSON.stringify(strayArg.content), /Valid arguments for record_query/);
   } finally {
     await client.close();
   }

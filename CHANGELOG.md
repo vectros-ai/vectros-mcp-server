@@ -3,6 +3,60 @@
 All notable changes to `@vectros-ai/mcp-server` are documented here.
 This project adheres to [Semantic Versioning](https://semver.org).
 
+## 0.6.0 — 2026-07-03
+
+Curation-focused tool improvements: look records and documents up by your own
+identifier, re-sync a changed body, archive and restore documents without delete
+authority, and get a clear error when an argument is wrong.
+
+### Added
+
+- **`externalId` selector on `record_get`, `record_update`, `document_get`, and
+  `document_update`.** Pass `externalId` together with `type` as an alternative to the
+  Vectros `id` — the tool resolves it for you, so an agent that only knows its own
+  identifier no longer has to make a separate lookup call first. `id` still works and
+  takes precedence when both are supplied.
+- **`upsert` on `document_ingest`.** With `upsert: true`, ingesting a document whose
+  `externalId` already exists overwrites its stored content and re-indexes it, instead
+  of returning the existing document unchanged. Re-supply the same `schemaId` so the
+  `externalId` resolves within the same type.
+- **`text` on `document_update`.** Replace a text document's body in place; the document
+  is re-queued for indexing so search reflects the new content.
+- **`status` on `document_update` — archive and restore a document.** Set
+  `status: "ARCHIVED"` to soft-retract a document: it is pulled from search and recall
+  but kept and recoverable. Set `status: "ACTIVE"` to re-index and restore it. This is
+  the way to retire superseded content with a credential that has no delete authority.
+  Document reads (`document_get`, `document_query`) surface the caller-controlled
+  lifecycle `status` alongside the read-only processing `indexStatus`.
+- **`hybrid_search` results are now sized for an agent's context window.** Each hit returns
+  its matched `chunkText` plus a short `snippet` by default; the broader surrounding passage
+  (`contextText`) is opt-in via **`includeContext: true`** (and is de-duplicated against
+  `chunkText` when included, so the same text is never sent twice). Internal search-index
+  bookkeeping fields (`tenantId`, `owner_id`, `model_type`, `rootFolderId`, `folderId`) are
+  stripped from each hit's `metadata`, keeping the fields you ingested. An oversized response
+  is trimmed to the top hits with **`truncated: true`** so one search can't overflow the
+  context window. A **`textLegEmpty: true`** flag signals that the keyword (BM25) leg matched
+  nothing across every hit — usually a long natural-language query under the default
+  `PHRASE` matching; retry with a short keyword phrase or `textMode: "OR"`.
+
+### Changed
+
+- Updated the bundled `@vectros-ai/sdk` to **0.32.0**, keeping the server aligned
+  with the current Vectros API (adds the document lifecycle `status` field, kept
+  distinct from the processing `indexStatus`).
+- **Document responses keep the two status axes separate.** `status` is the
+  caller-controlled lifecycle (`ACTIVE`/`ARCHIVED`); `indexStatus` is the read-only
+  processing state (`PENDING_INDEX`, `INDEXED`, …), matching the current API.
+  `document_ingest`'s file mode accordingly reports its "uploaded, indexing queued"
+  marker as `indexStatus: "PENDING_INDEX"` — previously it overwrote `status` with
+  that value. Poll `document_get` until `indexStatus` is `INDEXED`.
+- **Unknown arguments are now rejected, not ignored.** Calling a tool with an argument
+  it does not accept returns an error that names the unrecognized key and lists the
+  valid arguments for that tool, instead of silently dropping it. This surfaces typos
+  and stale parameter names immediately rather than letting a call quietly do the wrong
+  thing. `record_query`'s `field` documentation now also calls out that `externalId` is
+  always queryable.
+
 ## 0.5.3 — 2026-06-29
 
 SDK refresh. No tool, parameter, or result shapes changed.

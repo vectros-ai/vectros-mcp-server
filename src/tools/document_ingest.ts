@@ -164,6 +164,18 @@ const inputSchema = {
         'externalId returns the existing document (idempotent) instead of creating a duplicate — use it to make ' +
         'ingests safely retryable and as the key other records reference. Mirrors record_create.',
     ),
+  upsert: z
+    .boolean()
+    .optional()
+    .describe(
+      'When true, re-ingesting an existing externalId OVERWRITES that document and re-indexes the new body ' +
+        '(text mode) / re-uploads and re-indexes the new file (file mode), instead of returning the existing ' +
+        'one unchanged. This is the curation/re-sync primitive: edit a source, re-ingest with upsert:true, and ' +
+        'the search index reflects the new content. Requires the documents:u scope. IMPORTANT: pass the SAME ' +
+        'schemaId (and type) you used originally — externalId is unique WITHIN a type, so omitting schemaId ' +
+        'resolves in the untyped namespace and mints a duplicate instead of updating. The response `created` ' +
+        'flag confirms which happened (created:true = a new document was minted).',
+    ),
   schemaId: z
     .string()
     .optional()
@@ -227,14 +239,16 @@ const documentIngest: ToolFactory = ({ client, log, transport, ingestRoot }) => 
   name: 'document_ingest',
   title: 'Ingest a new document (text body or file upload)',
   description:
-    'Create a new document in the partner tenant. Two modes:\n' +
+    'Create a new document in your Vectros tenant. Two modes:\n' +
     '  • Text mode: pass `text` (string body). Single-call. Use for crawled content, notes, generated text.\n' +
     '  • File mode: pass `filePath` (local path on the MCP server\'s host machine). STDIO-TRANSPORT ONLY — ' +
     'rejected on HTTP transport. MCP server reads the bytes, requests a presigned upload URL, and PUTs them. ' +
-    'Returns when the upload is accepted (status: PENDING_INDEX); poll with `document_get` to confirm INDEXED.\n' +
+    'Returns when the upload is accepted (indexStatus: PENDING_INDEX); poll with `document_get` until indexStatus is INDEXED.\n' +
     'Either `text` or `filePath` must be present; both is an error. ' +
-    'Idempotent by `externalId` (re-ingest returns the existing document, not a duplicate). Pass `schemaId` + ' +
-    '`payload` for a typed, lookup-queryable document (records parity). ' +
+    'Idempotent by `externalId` (re-ingest returns the existing document, not a duplicate). To UPDATE an ' +
+    'existing document instead — re-index an edited body — pass `upsert:true` with the same `externalId` ' +
+    '(and the same `schemaId`); this is the re-sync primitive for keeping a knowledge base current. Pass ' +
+    '`schemaId` + `payload` for a typed, lookup-queryable document (records parity). ' +
     'indexMode defaults to HYBRID for untyped documents (omit to inherit a bound schema\'s default). ' +
     'storeText defaults to true (set false to skip storing the text body).',
   inputSchema,
@@ -243,6 +257,7 @@ const documentIngest: ToolFactory = ({ client, log, transport, ingestRoot }) => 
     const text = args.text as string | undefined;
     const filePath = args.filePath as string | undefined;
     const schemaId = args.schemaId as string | undefined;
+    const upsert = args.upsert as boolean | undefined;
     // Preserve the legacy default (HYBRID) for untyped documents; when a schema is
     // bound, omit indexMode so the schema's declared default is inherited (the API
     // rejects a request with neither). An explicit value — including NONE — always wins.
@@ -290,6 +305,7 @@ const documentIngest: ToolFactory = ({ client, log, transport, ingestRoot }) => 
       if (text) {
         const storeText = (args.storeText as boolean | undefined) ?? true;
         const result = await client.documents.ingestDocument({
+          upsert,
           body: {
             title,
             text,
@@ -338,6 +354,7 @@ const documentIngest: ToolFactory = ({ client, log, transport, ingestRoot }) => 
       const fileType = (args.fileType as string | undefined) ?? inferMimeType(safePath);
 
       const upload = await client.documents.uploadDocument({
+        upsert,
         fileName,
         fileType,
         indexMode,
@@ -378,7 +395,10 @@ const documentIngest: ToolFactory = ({ client, log, transport, ingestRoot }) => 
       );
 
       // Return the upload response — caller can poll document_get(id)
-      // to confirm INDEXED. We don't poll here; that's the agent's job.
+      // until indexStatus is INDEXED. We don't poll here; that's the agent's
+      // job. The server stamped indexStatus before our PUT completed, so
+      // override it with the post-upload processing state (the lifecycle
+      // `status` passes through untouched — it's a separate axis).
       return {
         content: [
           {
@@ -386,9 +406,9 @@ const documentIngest: ToolFactory = ({ client, log, transport, ingestRoot }) => 
             text: JSON.stringify(
               {
                 ...upload,
-                status: 'PENDING_INDEX',
+                indexStatus: 'PENDING_INDEX',
                 _note:
-                  'File uploaded; indexing is asynchronous. Poll document_get(id) until status is INDEXED.',
+                  'File uploaded; indexing is asynchronous. Poll document_get(id) until indexStatus is INDEXED.',
               },
               null,
               2,
