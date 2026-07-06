@@ -3,6 +3,27 @@
 All notable changes to `@vectros-ai/mcp-server` are documented here.
 This project adheres to [Semantic Versioning](https://semver.org).
 
+## 0.7.0 — 2026-07-05
+
+Text-retention control that works, and tool descriptions that tell the truth
+about it.
+
+### Added
+
+- **`storeText` works in file mode on `document_ingest`.** The flag was advertised but silently
+  dropped on file uploads; it now forwards your retention choice. Default `true` keeps the
+  extracted text available to `document_get(includeText: true)` and `document_ask`; `false`
+  discards it once indexing completes (search and the original-file download keep working).
+  Fixed at ingest — a re-ingest of the same document keeps the original choice.
+
+### Changed
+
+- **`document_update` no longer accepts `storeText`** — retention is immutable after ingest, so
+  the input was misleading (the server now rejects such updates).
+- `document_ingest`, `document_get`, and `document_update` descriptions rewritten to the real
+  retention semantics: text-mode bodies are always retained; text availability on
+  `document_get` reflects whether the text actually exists.
+
 ## 0.6.0 — 2026-07-03
 
 Curation-focused tool improvements: look records and documents up by your own

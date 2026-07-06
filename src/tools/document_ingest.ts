@@ -203,9 +203,12 @@ const inputSchema = {
     .boolean()
     .optional()
     .describe(
-      'If true (default), the text body is stored alongside the index so document_get(includeText:true) ' +
-        'can retrieve it later. Set false to index only — saves storage cost on large corpora but ' +
-        'document_get(includeText) will return textAvailable:false.',
+      'Whether the document\'s text is retained after indexing (default true). Applies to BOTH modes ' +
+        'and is fixed at ingest time. Text mode: the ingested body is always retained (this flag is ' +
+        'effectively always true — the body is the document). File mode: true keeps the extracted text ' +
+        'retrievable via document_get(includeText:true) and usable by document_ask; false discards the ' +
+        'extracted text once indexing completes — search still works and the original file remains ' +
+        'downloadable, but includeText returns textAvailable:false and document_ask is unavailable.',
     ),
 
   // File upload mode (mutually exclusive with text; stdio-transport-only):
@@ -250,7 +253,9 @@ const documentIngest: ToolFactory = ({ client, log, transport, ingestRoot }) => 
     '(and the same `schemaId`); this is the re-sync primitive for keeping a knowledge base current. Pass ' +
     '`schemaId` + `payload` for a typed, lookup-queryable document (records parity). ' +
     'indexMode defaults to HYBRID for untyped documents (omit to inherit a bound schema\'s default). ' +
-    'storeText defaults to true (set false to skip storing the text body).',
+    'storeText defaults to true and is fixed at ingest: in file mode, false discards the extracted text ' +
+    'after indexing (search + file download keep working; text retrieval and document_ask do not). ' +
+    'Text-mode bodies are always retained.',
   inputSchema,
   handler: async (args): Promise<ToolResult> => {
     const title = args.title as string;
@@ -302,15 +307,16 @@ const documentIngest: ToolFactory = ({ client, log, transport, ingestRoot }) => 
 
     try {
       // ── Text mode ────────────────────────────────────────────────
+      // A text-ingested body is the document itself and is always retained —
+      // storeText is not part of the text contract (it is a file-upload knob),
+      // so it is not forwarded here even if the caller supplied it.
       if (text) {
-        const storeText = (args.storeText as boolean | undefined) ?? true;
         const result = await client.documents.ingestDocument({
           upsert,
           body: {
             title,
             text,
             indexMode,
-            storeText,
             ...common,
           },
         });
@@ -353,11 +359,15 @@ const documentIngest: ToolFactory = ({ client, log, transport, ingestRoot }) => 
       const fileName = basename(safePath);
       const fileType = (args.fileType as string | undefined) ?? inferMimeType(safePath);
 
+      // storeText forwards the caller's retention choice to the file path (default
+      // true — retain the extracted text; false discards it once indexing completes).
+      const storeTextFile = (args.storeText as boolean | undefined) ?? true;
       const upload = await client.documents.uploadDocument({
         upsert,
         fileName,
         fileType,
         indexMode,
+        storeText: storeTextFile,
         ...common,
       });
 

@@ -1110,10 +1110,10 @@ test('document_ingest text mode calls ingestDocument with correct args + default
   assert.equal(a.title, 'My Doc');
   assert.equal(a.text, 'Hello world.');
   assert.equal(a.indexMode, 'HYBRID', 'default indexMode is HYBRID');
-  assert.equal(a.storeText, true, 'default storeText is true');
+  assert.equal(a.storeText, undefined, 'storeText is not part of the text-ingest contract — never forwarded');
 });
 
-test('document_ingest text mode passes through indexMode + storeText + ownership + payload/schemaId/externalId', async () => {
+test('document_ingest text mode passes through indexMode + ownership + payload/schemaId/externalId, and never forwards storeText', async () => {
   const s = spy();
   const client = {
     documents: {
@@ -1141,7 +1141,7 @@ test('document_ingest text mode passes through indexMode + storeText + ownership
   );
   const a = (s.calls[0].args as { body: Record<string, unknown> }).body;
   assert.equal(a.indexMode, 'SEMANTIC');
-  assert.equal(a.storeText, false);
+  assert.equal(a.storeText, undefined, 'text mode drops storeText even when supplied — the body is always retained');
   assert.equal(a.folderId, 'fld_1');
   assert.deepEqual(a.payload, { source: 'crawl' });
   assert.equal(a.schemaId, 'sch_1');
@@ -1196,6 +1196,37 @@ test('document_ingest file mode passes upsert to uploadDocument', async () => {
     }
     const req = s.calls.find((c) => c.method === 'uploadDocument')!.args as { upsert?: boolean };
     assert.equal(req.upsert, true, 'upsert forwarded to uploadDocument (file-mode re-sync)');
+  } finally {
+    await unlink(tmp);
+  }
+});
+
+test('document_ingest file mode forwards storeText (explicit false) and defaults it to true', async () => {
+  const s = spy();
+  const client = {
+    documents: {
+      uploadDocument: async (args: unknown) => {
+        s.record('uploadDocument', args);
+        return { id: 'doc1', uploadUrl: 'https://x/y', created: true };
+      },
+    },
+  } as never;
+  const tmp = join(tmpdir(), `mcp-storetext-${process.pid}.txt`);
+  await writeFile(tmp, 'file bytes');
+  try {
+    const tool = documentIngest({ client, log, ingestRoot: tmpdir() });
+    const origFetch = globalThis.fetch;
+    globalThis.fetch = (async () => ({ ok: true, status: 200, text: async () => '' })) as never;
+    try {
+      await tool.handler({ title: 'F', filePath: basename(tmp), storeText: false }, {});
+      await tool.handler({ title: 'F2', filePath: basename(tmp) }, {});
+    } finally {
+      globalThis.fetch = origFetch;
+    }
+    const reqs = s.calls.filter((c) => c.method === 'uploadDocument').map((c) => c.args as { storeText?: boolean });
+    assert.equal(reqs.length, 2);
+    assert.equal(reqs[0].storeText, false, 'explicit storeText:false forwarded on the file path');
+    assert.equal(reqs[1].storeText, true, 'storeText defaults to true when omitted');
   } finally {
     await unlink(tmp);
   }
@@ -1473,7 +1504,8 @@ test('document_update forwards title/folderId/ownership; omits payload when no f
   const upd = s.calls[0].args as { body: Record<string, unknown> };
   assert.equal(upd.body.title, 'New Title');
   assert.equal(upd.body.folderId, 'fld_new');
-  assert.equal(upd.body.storeText, true, 'storeText forwarded');
+  assert.equal(upd.body.storeText, undefined,
+    'storeText is immutable (fixed at ingest) — never forwarded on update, even if supplied');
   assert.equal(upd.body.userId, 'u9', 'ownership reassignment forwarded');
   assert.equal(upd.body.orgId, 'o9');
   assert.equal(upd.body.clientId, 'c9');

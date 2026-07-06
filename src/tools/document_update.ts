@@ -6,10 +6,10 @@
  *   • `payload`, when supplied, is DEEP-MERGED into the stored payload (keys you
  *     send overwrite, a key set to `null` is deleted, omitted keys preserved) —
  *     no read-modify-write, no wipe trap.
- *   • Top-level fields (`title`, `folderId`, `storeText`, `status`, ownership) are
- *     set when present and left unchanged when omitted.
- *   • `indexMode`/`externalId` are immutable and rejected if present; `folderId`
- *     can be SET but not cleared.
+ *   • Top-level fields (`title`, `folderId`, `status`, ownership) are set when
+ *     present and left unchanged when omitted.
+ *   • `indexMode`/`externalId`/`storeText` are immutable (text retention is fixed
+ *     at ingest) and rejected if present; `folderId` can be SET but not cleared.
  *
  * Optimistic concurrency: pass the `version` you last read as `expectedVersion`.
  * If the document changed since, the server rejects with a 409 conflict (re-read
@@ -56,7 +56,6 @@ const inputSchema = {
         'the stored text unchanged. This is the in-place alternative to re-ingesting with upsert:true.',
     ),
   folderId: z.string().optional().describe('Move the document into this folder (cannot be cleared once set).'),
-  storeText: z.boolean().optional().describe('Whether the raw text is stored + retrievable.'),
   status: z
     .enum(['ACTIVE', 'ARCHIVED'])
     .optional()
@@ -98,7 +97,6 @@ const documentUpdate: ToolFactory = ({ client, log }) => ({
     const fields = args.fields as Record<string, unknown> | undefined;
     const text = args.text as string | undefined;
     const folderId = args.folderId as string | undefined;
-    const storeText = args.storeText as boolean | undefined;
     const status = args.status as Vectros.DocumentRequest.Status | undefined;
     const userId = args.userId as string | undefined;
     const orgId = args.orgId as string | undefined;
@@ -117,7 +115,6 @@ const documentUpdate: ToolFactory = ({ client, log }) => ({
       if (fields !== undefined) body.payload = fields;
       if (text !== undefined) body.text = text;
       if (folderId !== undefined) body.folderId = folderId;
-      if (storeText !== undefined) body.storeText = storeText;
       if (status !== undefined) body.status = status;
       if (userId !== undefined) body.userId = userId;
       if (orgId !== undefined) body.orgId = orgId;

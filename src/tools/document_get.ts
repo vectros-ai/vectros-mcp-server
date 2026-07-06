@@ -14,7 +14,7 @@
  * Truncation surfaces as `truncated: true` in the response.
  *
  * `getDocumentText` returns 404 when the document was ingested
- * without `storeText: true`. We handle this gracefully — surface
+ * whose text is not retained. We handle this gracefully — surface
  * `textAvailable: false` in the response so the agent knows
  * `document_ask` is the right next step instead of returning isError.
  *
@@ -70,9 +70,10 @@ function truncateText(text: string): { text: string; truncated: boolean } {
 
 /**
  * Is this a "the document has no retrievable file/text" response rather than a
- * real error? getDocumentText 404s when ingested without storeText; a download
- * URL is 404/400 for a text-only (non-file) document. Both mean "not available
- * for this document", which we surface as a flag rather than isError.
+ * real error? getDocumentText 404s when the text was not retained (file uploads
+ * with storeText:false discard it after indexing); a download URL is 404/400 for
+ * a text-only (non-file) document. Both mean "not available for this document",
+ * which we surface as a flag rather than isError.
  */
 function isNotAvailable(err: unknown): boolean {
   if (!(err instanceof Error)) return false;
@@ -86,9 +87,10 @@ const documentGet: ToolFactory = ({ client, log }) => ({
   description:
     'Fetch metadata for a single document — select it by its Vectros `documentId` OR by your own ' +
     '`externalId` + `type` (resolved for you). Pass `includeText: true` to also fetch the text body ' +
-    '(capped at ~8K tokens; `truncated: true` flag if cut). If the document was ingested without ' +
-    '`storeText: true`, text is unavailable — `textAvailable: false` flag is set and the agent should ' +
-    'use `document_ask` for question-driven extraction instead. Pass `includeDownloadUrl: true` to also ' +
+    '(capped at ~8K tokens; `truncated: true` flag if cut). Text is available for every text-ingested ' +
+    'document and for file-ingested documents unless they were uploaded with `storeText: false` (extracted ' +
+    'text discarded after indexing) — then `textAvailable: false` is set; the original file is still ' +
+    'retrievable via `includeDownloadUrl`. Pass `includeDownloadUrl: true` to also ' +
     'get a short-lived presigned `downloadUrl` for the original file (file-backed documents only). ' +
     'Returns the full document metadata, including its lifecycle `status` (ACTIVE, or ARCHIVED when ' +
     'soft-retracted from search — restorable via document_update) and its processing `indexStatus`.',
@@ -109,7 +111,7 @@ const documentGet: ToolFactory = ({ client, log }) => ({
       let extra: Record<string, unknown> = {};
 
       if (includeText) {
-        // Second call — swallow 404 gracefully (ingested without storeText).
+        // Second call — swallow 404 gracefully (text not retained).
         try {
           const textResponse = await client.documents.getDocumentText({ id });
           const rawText = textResponse?.text ?? '';
@@ -119,7 +121,7 @@ const documentGet: ToolFactory = ({ client, log }) => ({
           if (isNotAvailable(textErr)) {
             log.debug(
               { tool: 'document_get', id },
-              'document_get text unavailable (ingested without storeText)',
+              'document_get text unavailable (not retained — storeText:false upload)',
             );
             extra = { ...extra, textAvailable: false };
           } else {
