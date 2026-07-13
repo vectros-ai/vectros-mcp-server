@@ -287,6 +287,47 @@ test('hybrid_search enforces a per-response byte budget and flags truncation', a
   assert.equal(body.returnedResults, body.results.length);
 });
 
+test('hybrid_search flags hasMore when totalResults exceeds this page (offset + returned)', async () => {
+  // Page 1: 3 hits returned, but the matching pool is 12 → more remain.
+  const page1 = searchClientReturning({
+    results: [{ documentId: 'd1' }, { documentId: 'd2' }, { documentId: 'd3' }],
+    totalResults: 12,
+    searchTimeMs: 2,
+  });
+  const b1 = parsedText(await hybridSearch({ client: page1, log }).handler({ query: 'q', limit: 3 }, {})) as Record<string, unknown>;
+  assert.equal(b1.hasMore, true, 'pool (12) > offset(0)+returned(3) → more remain');
+
+  // With an offset that reaches the pool end, no more remain.
+  const page2 = searchClientReturning({
+    results: [{ documentId: 'd11' }, { documentId: 'd12' }],
+    totalResults: 12,
+    searchTimeMs: 2,
+  });
+  const b2 = parsedText(await hybridSearch({ client: page2, log }).handler({ query: 'q', limit: 3, offset: 10 }, {})) as Record<string, unknown>;
+  assert.equal(b2.hasMore, undefined, 'offset(10)+returned(2) reaches the pool (12) → hasMore not set');
+});
+
+test('hybrid_search does not fabricate hasMore when the backend omits totalResults', async () => {
+  // No totalResults on the response → pool size unknown → never assert a more-remains signal.
+  const client = searchClientReturning({ results: [{ documentId: 'd1' }], searchTimeMs: 1 });
+  const body = parsedText(await hybridSearch({ client, log }).handler({ query: 'q' }, {})) as Record<string, unknown>;
+  assert.equal(body.hasMore, undefined, 'hasMore is gated on a numeric totalResults');
+});
+
+test('hybrid_search forwards a raised limit up to the API max (50)', async () => {
+  const s = spy();
+  const client = {
+    search: {
+      content: async (args: unknown) => {
+        s.record('content', args);
+        return { results: [], totalResults: 0, searchTimeMs: 0 };
+      },
+    },
+  } as never;
+  await hybridSearch({ client, log }).handler({ query: 'q', limit: 50 }, {});
+  assert.equal((s.calls[0].args as Record<string, unknown>).limit, 50, 'limit:50 forwarded, not re-clamped to 10');
+});
+
 // ============================================================================
 // record_query — mode auto-selection
 // ============================================================================
@@ -315,9 +356,10 @@ test('record_query lookup mode routes through lookupRecordsByBody (POST) + unwra
   assert.equal(a.field, 'externalId');
   assert.equal(a.value, 'p-001');
   assert.equal(a.limit, 3, 'lookup mode is capped by the MCP limit too (token economy)');
-  const body = parsedText(r) as unknown[];
-  assert.ok(Array.isArray(body), 'response is a bare records array, not the page envelope');
-  assert.equal(body.length, 1);
+  const body = parsedText(r) as { data: unknown[]; nextCursor: string | null };
+  assert.ok(Array.isArray(body.data), 'response is a { data, nextCursor } page envelope');
+  assert.equal(body.data.length, 1);
+  assert.equal(body.nextCursor, null, 'null cursor → no more pages');
 });
 
 test('record_query lookup supports range + prefix, and rejects bad mode combos', async () => {
@@ -381,11 +423,39 @@ test('record_query enters list mode when only type (+ optional owner) present + 
   assert.equal(a.type, 'patient');
   assert.equal(a.userId, 'usr_1');
   assert.equal(a.limit, 3, 'MCP-specific default 3 (not API 100)');
-  // Unwrapped to the first page's records — a non-null nextCursor does NOT
-  // trigger a drain here (the MCP limit is the intended ceiling).
-  const body = parsedText(r) as unknown[];
-  assert.ok(Array.isArray(body));
-  assert.equal(body.length, 2);
+  // One page surfaced as { data, nextCursor } — a non-null cursor does NOT trigger a
+  // drain here (the agent decides whether to page), but IS surfaced so it can.
+  const body = parsedText(r) as { data: unknown[]; nextCursor: string | null };
+  assert.ok(Array.isArray(body.data));
+  assert.equal(body.data.length, 2);
+  assert.equal(body.nextCursor, 'more', 'non-null cursor surfaced → more results remain');
+});
+
+test('record_query forwards startFrom + a raised limit (up to the API max) on both modes', async () => {
+  const s = spy();
+  const client = {
+    records: {
+      listRecords: async (args: unknown) => {
+        s.record('listRecords', args);
+        return { data: [{ id: 'r1' }], nextCursor: null };
+      },
+      lookupRecordsByBody: async (args: unknown) => {
+        s.record('lookupRecordsByBody', args);
+        return { data: [{ id: 'r2' }], nextCursor: null };
+      },
+    },
+  } as never;
+  const tool = recordQuery({ client, log });
+
+  await tool.handler({ type: 'patient', startFrom: 'cur_page2', limit: 100 }, {});
+  let a = s.calls.at(-1)!.args as Record<string, unknown>;
+  assert.equal(a.startFrom, 'cur_page2', 'list mode forwards the page cursor');
+  assert.equal(a.limit, 100, 'the raised limit (API max) is forwarded, not re-clamped to 10');
+
+  await tool.handler({ type: 'patient', field: 'externalId', value: 'p-1', startFrom: 'cur_lk', limit: 50 }, {});
+  a = s.calls.at(-1)!.args as Record<string, unknown>;
+  assert.equal(a.startFrom, 'cur_lk', 'lookup mode forwards the page cursor too');
+  assert.equal(a.limit, 50);
 });
 
 test('record_query returns isError when SDK throws', async () => {
@@ -423,9 +493,10 @@ test('document_query list mode routes through listDocuments + unwraps {data}', a
   assert.equal(a.folderId, 'fld_a');
   assert.equal(a.userId, 'u1');
   assert.equal(a.limit, 5);
-  const body = parsedText(r) as unknown[];
-  assert.ok(Array.isArray(body), 'bare array, not the {data} envelope');
-  assert.equal(body.length, 2);
+  const body = parsedText(r) as { data: unknown[]; nextCursor: string | null };
+  assert.ok(Array.isArray(body.data), '{ data, nextCursor } page envelope');
+  assert.equal(body.data.length, 2);
+  assert.equal(body.nextCursor, null);
 });
 
 test('document_query lookup mode routes through lookupDocumentsByBody (POST) + unwraps {data}', async () => {
@@ -446,9 +517,50 @@ test('document_query lookup mode routes through lookupDocumentsByBody (POST) + u
   assert.equal(a.type, 'invoice');
   assert.equal(a.field, 'mrn');
   assert.equal(a.value, 'MRN-1001');
-  const body = parsedText(r) as unknown[];
-  assert.ok(Array.isArray(body));
-  assert.equal(body.length, 1);
+  const body = parsedText(r) as { data: unknown[]; nextCursor: string | null };
+  assert.ok(Array.isArray(body.data));
+  assert.equal(body.data.length, 1);
+});
+
+test('document_query surfaces a non-null nextCursor + forwards startFrom and a raised limit', async () => {
+  const s = spy();
+  const client = {
+    documents: {
+      listDocuments: async (args: unknown) => {
+        s.record('listDocuments', args);
+        return { data: [{ id: 'doc1' }], nextCursor: 'cur_next' };
+      },
+    },
+  } as never;
+  const tool = documentQuery({ client, log });
+  const r = await tool.handler({ folderId: 'fld_a', startFrom: 'cur_prev', limit: 100 }, {});
+  const a = s.calls[0].args as Record<string, unknown>;
+  assert.equal(a.startFrom, 'cur_prev', 'page cursor forwarded');
+  assert.equal(a.limit, 100, 'raised limit (API max) forwarded, not re-clamped');
+  const body = parsedText(r) as { data: unknown[]; nextCursor: string | null };
+  assert.equal(body.nextCursor, 'cur_next', 'more-remains cursor surfaced');
+});
+
+test('document_query forwards startFrom + a raised limit on LOOKUP mode too (POST body)', async () => {
+  const s = spy();
+  const client = {
+    documents: {
+      lookupDocumentsByBody: async (args: unknown) => {
+        s.record('lookupDocumentsByBody', args);
+        return { data: [{ id: 'doc9' }], nextCursor: 'cur_lk_next' };
+      },
+    },
+  } as never;
+  const tool = documentQuery({ client, log });
+  const r = await tool.handler(
+    { type: 'invoice', field: 'mrn', value: 'MRN-1', startFrom: 'cur_lk', limit: 100 },
+    {},
+  );
+  assert.equal(s.calls[0].method, 'lookupDocumentsByBody');
+  const a = s.calls[0].args as Record<string, unknown>;
+  assert.equal(a.startFrom, 'cur_lk', 'lookup mode forwards the page cursor to the POST body');
+  assert.equal(a.limit, 100);
+  assert.equal((parsedText(r) as { nextCursor: string | null }).nextCursor, 'cur_lk_next');
 });
 
 test('document_query lookup supports range + prefix, and rejects bad mode combos / missing type', async () => {
@@ -594,6 +706,21 @@ test('rag_ask passes retrieval scoping + instructions + temperature through to t
   assert.deepEqual(search.filters, { status: 'open' });
   assert.equal(search.createdAfter, '2024-01-01T00:00:00Z');
   assert.equal(search.requireComplete, true);
+});
+
+test('rag_ask forwards a raised grounding-corpus limit up to the API max (50)', async () => {
+  const s = spy();
+  const client = {
+    inference: {
+      ragInference: async (args: unknown) => {
+        s.record('ragInference', args);
+        return ragStream();
+      },
+    },
+  } as never;
+  await ragAsk({ client, log }).handler({ query: 'q', search: { limit: 50 } }, {});
+  const search = (s.calls[0].args as Record<string, unknown>).search as Record<string, unknown>;
+  assert.equal(search.limit, 50, 'corpus limit 50 (API max) forwarded, not re-clamped to 10');
 });
 
 test('rag_ask returns isError when SDK throws', async () => {
@@ -2100,7 +2227,11 @@ test('lookup_principal resolve mode: externalId → list{Kind} for user/org/clie
   assert.ok(!ru.isError);
   assert.equal(s.calls[0].method, 'listUsers');
   assert.equal((s.calls[0].args as Record<string, unknown>).externalId, 'usr_1');
-  assert.deepEqual(parsedText(ru), [{ id: 'u-uuid' }], 'resolve returns the principal incl. its UUID');
+  assert.deepEqual(
+    parsedText(ru),
+    { data: [{ id: 'u-uuid' }], nextCursor: null },
+    'resolve returns a { data, nextCursor } page (one match, so the cursor is null)',
+  );
 
   await tool.handler({ kind: 'org', externalId: 'org_1' }, {});
   assert.equal(s.calls[1].method, 'listOrgs');
@@ -2155,6 +2286,28 @@ test('lookup_principal forwards range/prefix/order to the lookup POST body', asy
   const a = s.calls[0].args as Record<string, unknown>;
   assert.equal(a.prefix, 'gold');
   assert.equal(a.order, 'desc');
+});
+
+test('lookup_principal paginates: forwards startFrom + raised limit, surfaces nextCursor', async () => {
+  const s = spy();
+  const client = {
+    identity: {
+      lookupUsers: async (a: unknown) => {
+        s.record('lookupUsers', a);
+        return { data: [{ id: 'u1' }], nextCursor: 'cur_next' };
+      },
+    },
+  } as never;
+  const tool = lookupPrincipal({ client, log });
+  const r = await tool.handler(
+    { kind: 'user', type: 'person_v1', field: 'email', prefix: 'a', startFrom: 'cur_prev', limit: 100 },
+    {},
+  );
+  const a = s.calls[0].args as Record<string, unknown>;
+  assert.equal(a.startFrom, 'cur_prev', 'page cursor forwarded to the lookup POST body');
+  assert.equal(a.limit, 100, 'raised limit (API max) forwarded');
+  const body = parsedText(r) as { data: unknown[]; nextCursor: string | null };
+  assert.equal(body.nextCursor, 'cur_next', 'more-remains cursor surfaced');
 });
 
 test('lookup_principal: externalId wins when both externalId and a field lookup are given', async () => {

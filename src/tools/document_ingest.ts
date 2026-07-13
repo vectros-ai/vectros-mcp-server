@@ -236,6 +236,17 @@ const inputSchema = {
   userId: z.string().optional().describe('Owning user ID. Optional.'),
   orgId: z.string().optional().describe('Owning org ID. Optional.'),
   clientId: z.string().optional().describe('Owning client ID. Optional.'),
+  scopes: z
+    .array(z.string())
+    .optional()
+    .describe(
+      'TEXT MODE ONLY. Scope ownership as `namespace:value` entries, at most 2 (e.g. ["org:<uuid>", ' +
+        '"group:eng-team"]). This is the document\'s COMPLETE scope declaration and values must come from ' +
+        'the credential\'s own identity. An empty array `[]` creates a PRIVATE document owned by the calling ' +
+        'user alone. Omit to stamp the credential\'s full identity — the default. `org:`/`client:` entries ' +
+        'are equivalent to the orgId/clientId fields. Rejected with `filePath` (file uploads do not accept ' +
+        'a scope declaration): a file-uploaded document is stamped with the credential\'s full identity.',
+    ),
 };
 
 const documentIngest: ToolFactory = ({ client, log, transport, ingestRoot }) => ({
@@ -295,6 +306,22 @@ const documentIngest: ToolFactory = ({ client, log, transport, ingestRoot }) => 
       );
     }
 
+    // Scope gate — the file-upload init endpoint does not accept a `scopes`
+    // declaration, so passing it through would be SILENTLY DROPPED and the
+    // document stamped with the credential's full identity. For `scopes: []`
+    // (a private document) that would be a silent tier ESCALATION —
+    // intended-private content becoming org/team-visible. Fail loud instead.
+    if (filePath && args.scopes !== undefined) {
+      return toolError(
+        'document_ingest',
+        new Error(
+          '`scopes` is not supported with `filePath` — file uploads do not accept a scope declaration, and ' +
+            'silently ignoring it could make an intended-private document team-visible. Use `text` mode to ' +
+            'declare scopes, or omit `scopes` (the upload is stamped with the credential\'s full identity).',
+        ),
+      );
+    }
+
     const common = {
       folderId: args.folderId as string | undefined,
       payload: args.payload as Record<string, unknown> | undefined,
@@ -317,6 +344,9 @@ const documentIngest: ToolFactory = ({ client, log, transport, ingestRoot }) => 
             title,
             text,
             indexMode,
+            // Scope ownership is a TEXT-mode contract only (the upload-init
+            // endpoint has no scopes field — see the gate above).
+            scopes: args.scopes as string[] | undefined,
             ...common,
           },
         });

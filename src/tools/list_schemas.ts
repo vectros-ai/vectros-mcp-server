@@ -60,7 +60,7 @@ const listSchemas: ToolFactory = ({ client, log }) => ({
   name: 'list_schemas',
   title: 'List record schemas',
   description:
-    'List the structured-record schema catalog for the partner tenant. ' +
+    'List the structured-record schema catalog for your tenant. ' +
     'Each schema describes a record type (e.g. "patient", "clinical_note") — its fields, lookup-indexed fields, and capabilities. ' +
     'Use this to discover what record types exist before calling `record_query`. ' +
     'Filter with `surface` (record/document/user/org/client — e.g. only document types), `recordType` (resolve ' +

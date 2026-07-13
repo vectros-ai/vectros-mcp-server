@@ -21,7 +21,11 @@ import { consumeStream, type SseEvent } from '../sse.js';
 import { toolError } from './errors.js';
 
 const SEARCH_MCP_DEFAULT_LIMIT = 5;
-const SEARCH_MCP_MAX_LIMIT = 10;
+// The grounding-corpus size. Default 5 keeps the prompt tight; max 50 is the RAG search API
+// max (the retrieval helper caps a run at 50 passages) — raise it when a broader corpus is
+// worth the larger prompt. Passages are not returned to the agent inline, so this is a
+// generation-cost knob, not a context-window one; there is no page cursor (it is a corpus size).
+const SEARCH_MCP_MAX_LIMIT = 50;
 
 const inputSchema = {
   query: z.string().min(1, 'query must be non-empty').describe('Question to ground against retrieved content.'),
@@ -36,7 +40,7 @@ const inputSchema = {
     .string()
     .optional()
     .describe(
-      'Inference model alias (e.g. claude-haiku-4-5, claude-sonnet-4-6, claude-opus-4-8). ' +
+      'Inference model alias (e.g. claude-haiku-4-5, claude-sonnet-5, claude-opus-4-8). ' +
         'Default = tier-appropriate Haiku. See GET /v1/models for the catalog the calling key can reach.',
     ),
   search: z
@@ -48,13 +52,25 @@ const inputSchema = {
         .min(1)
         .max(SEARCH_MCP_MAX_LIMIT)
         .optional()
-        .describe(`Passages to retrieve before generating. Default ${SEARCH_MCP_DEFAULT_LIMIT}, max ${SEARCH_MCP_MAX_LIMIT}.`),
+        .describe(
+          `Passages to retrieve before generating (the grounding-corpus size). Default ` +
+            `${SEARCH_MCP_DEFAULT_LIMIT}; raise up to ${SEARCH_MCP_MAX_LIMIT} (the RAG search API max) for a ` +
+            'broader corpus when the extra grounding is worth the larger prompt.',
+        ),
       // Retrieval scoping — parity with hybrid_search so an agent can ground the
       // answer on a specific owner / folder / type / metadata subset, not just the
       // whole-tenant corpus.
       userId: z.string().optional().describe('Restrict retrieval to content owned by this user (Vectros UUID).'),
       orgId: z.string().optional().describe('Restrict retrieval to content owned by this org (Vectros UUID).'),
       clientId: z.string().optional().describe('Restrict retrieval to content tagged with this client (Vectros UUID).'),
+      scope: z
+        .string()
+        .optional()
+        .describe(
+          'Restrict retrieval to content carrying this scope value, in `namespace:value` form ' +
+            '(e.g. "org:<uuid>", "group:eng-team"). `scope=org:<id>`/`scope=client:<id>` are equivalent ' +
+            'to the orgId/clientId filters.',
+        ),
       folderId: z.string().optional().describe('Restrict retrieval to this exact folder.'),
       rootFolderId: z.string().optional().describe('Restrict retrieval to this folder and all its descendants.'),
       typeName: z.string().optional().describe('Restrict record retrieval to this schema type.'),
@@ -91,7 +107,7 @@ const ragAsk: ToolFactory = ({ client, log }) => ({
   name: 'rag_ask',
   title: 'RAG ask (corpus-wide)',
   description:
-    'Ask a question grounded against the partner tenant\'s indexed content. ' +
+    'Ask a question grounded against your tenant\'s indexed content. ' +
     'Vectros performs a hybrid search, injects the top-K passages into the prompt, ' +
     'and streams a model answer back. Scope retrieval with `search` (ownership, folder, type, metadata filters, ' +
     'date window) to ground on a subset — e.g. one patient or one folder — and steer generation with ' +
@@ -107,6 +123,7 @@ const ragAsk: ToolFactory = ({ client, log }) => ({
         userId?: string;
         orgId?: string;
         clientId?: string;
+        scope?: string;
         folderId?: string;
         rootFolderId?: string;
         typeName?: string;
@@ -122,6 +139,7 @@ const ragAsk: ToolFactory = ({ client, log }) => ({
         userId: searchArg.userId,
         orgId: searchArg.orgId,
         clientId: searchArg.clientId,
+        scope: searchArg.scope,
         folderId: searchArg.folderId,
         rootFolderId: searchArg.rootFolderId,
         typeName: searchArg.typeName,

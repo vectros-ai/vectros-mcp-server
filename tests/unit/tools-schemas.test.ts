@@ -85,9 +85,14 @@ test('hybrid_search rejects empty query', () => {
   assert.ok(!r.success);
 });
 
-test('hybrid_search rejects limit > 10 (MCP-specific cap)', () => {
-  const r = validate('hybrid_search', { query: 'q', limit: 50 });
-  assert.ok(!r.success, 'limit:50 must be rejected to protect context window');
+test('hybrid_search accepts limit up to the API max (50) + offset for pagination', () => {
+  assert.ok(validate('hybrid_search', { query: 'q', limit: 50 }).success, 'limit:50 (the API max) is allowed');
+  assert.ok(validate('hybrid_search', { query: 'q', limit: 25, offset: 50 }).success);
+});
+
+test('hybrid_search rejects limit > 50 (the API max) and offset > 200', () => {
+  assert.ok(!validate('hybrid_search', { query: 'q', limit: 51 }).success, 'limit:51 exceeds the search API max');
+  assert.ok(!validate('hybrid_search', { query: 'q', offset: 201 }).success, 'offset:201 exceeds the API max');
 });
 
 test('hybrid_search rejects bad mode', () => {
@@ -110,8 +115,13 @@ test('record_query rejects missing type', () => {
   assert.ok(!r.success);
 });
 
-test('record_query rejects limit > 10', () => {
-  const r = validate('record_query', { type: 'patient', limit: 100 });
+test('record_query accepts limit up to the API max (100) + a startFrom cursor', () => {
+  assert.ok(validate('record_query', { type: 'patient', limit: 100 }).success, 'limit:100 (the API max) is allowed');
+  assert.ok(validate('record_query', { type: 'patient', startFrom: 'cur_1' }).success, 'startFrom cursor accepted');
+});
+
+test('record_query rejects limit > 100 (the API max)', () => {
+  const r = validate('record_query', { type: 'patient', limit: 101 });
   assert.ok(!r.success);
 });
 
@@ -123,15 +133,20 @@ test('rag_ask accepts minimal args', () => {
 test('rag_ask accepts full args', () => {
   const r = validate('rag_ask', {
     query: 'q',
-    model: 'claude-sonnet-4-6',
+    model: 'claude-sonnet-5',
     search: { mode: 'HYBRID', limit: 5 },
     maxTokens: 1024,
   });
   assert.ok(r.success);
 });
 
-test('rag_ask rejects search.limit > MCP cap', () => {
+test('rag_ask accepts search.limit up to the API max (50)', () => {
   const r = validate('rag_ask', { query: 'q', search: { limit: 50 } });
+  assert.ok(r.success, 'corpus limit 50 (the RAG search API max) is allowed');
+});
+
+test('rag_ask rejects search.limit > 50 (the API max)', () => {
+  const r = validate('rag_ask', { query: 'q', search: { limit: 51 } });
   assert.ok(!r.success);
 });
 
@@ -287,8 +302,13 @@ test('document_query accepts equality-lookup mode', () => {
   assert.ok(r.success);
 });
 
-test('document_query rejects limit > 10 (MCP cap)', () => {
-  const r = validate('document_query', { limit: 50 });
+test('document_query accepts limit up to the API max (100) + a startFrom cursor', () => {
+  assert.ok(validate('document_query', { limit: 100 }).success, 'limit:100 (the API max) is allowed');
+  assert.ok(validate('document_query', { folderId: 'fld_1', startFrom: 'cur_1' }).success, 'startFrom cursor accepted');
+});
+
+test('document_query rejects limit > 100 (the API max)', () => {
+  const r = validate('document_query', { limit: 101 });
   assert.ok(!r.success);
 });
 
@@ -335,9 +355,9 @@ test('folder_query accepts get mode (id) and list mode (parentId)', () => {
   assert.ok(validate('folder_query', { parentId: 'fld_root', limit: 20 }).success);
 });
 
-test('folder_query rejects limit > 50 (MCP cap)', () => {
-  const r = validate('folder_query', { limit: 100 });
-  assert.ok(!r.success);
+test('folder_query accepts limit up to the API max (100); rejects above it', () => {
+  assert.ok(validate('folder_query', { parentId: 'root', limit: 100 }).success, 'limit:100 (the API max) is allowed');
+  assert.ok(!validate('folder_query', { limit: 101 }).success);
 });
 
 // folder_create -----------------------------------------------------------
@@ -395,10 +415,15 @@ test('lookup_principal accepts resolve mode (externalId) and lookup mode (type+f
   assert.ok(validate('lookup_principal', { kind: 'user', type: 'person_v1', field: 'email', value: 'lookup-val', order: 'desc' }).success);
 });
 
-test('lookup_principal rejects a bad kind / bad order / limit > 50', () => {
+test('lookup_principal accepts limit up to the API max (100) + a startFrom cursor', () => {
+  assert.ok(validate('lookup_principal', { kind: 'user', externalId: 'x', limit: 100 }).success, 'limit:100 (the API max) is allowed');
+  assert.ok(validate('lookup_principal', { kind: 'user', type: 't', field: 'f', value: 'v', startFrom: 'cur_1' }).success);
+});
+
+test('lookup_principal rejects a bad kind / bad order / limit > 100', () => {
   assert.ok(!validate('lookup_principal', { kind: 'tenant', externalId: 'x' }).success);
   assert.ok(!validate('lookup_principal', { kind: 'user', type: 't', field: 'f', value: 'v', order: 'down' }).success);
-  assert.ok(!validate('lookup_principal', { kind: 'user', externalId: 'x', limit: 100 }).success);
+  assert.ok(!validate('lookup_principal', { kind: 'user', externalId: 'x', limit: 101 }).success);
 });
 
 test('lookup_principal rejects missing kind', () => {

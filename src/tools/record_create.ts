@@ -13,6 +13,7 @@
  * permission error (the tool never tears down the session).
  */
 import { z } from 'zod';
+import type { Vectros } from '@vectros-ai/sdk';
 import type { ToolFactory, ToolResult } from './types.js';
 import { toolError } from './errors.js';
 
@@ -48,6 +49,16 @@ const inputSchema = {
   userId: z.string().optional().describe('Owning user id.'),
   orgId: z.string().optional().describe('Owning organization id.'),
   clientId: z.string().optional().describe('Associated client id.'),
+  scopes: z
+    .array(z.string())
+    .optional()
+    .describe(
+      'Scope ownership as `namespace:value` entries, at most 2 (e.g. ["org:<uuid>", "group:eng-team"]). ' +
+        'This is the record\'s COMPLETE scope declaration and values must come from the credential\'s own ' +
+        'identity. An empty array `[]` creates a PRIVATE record owned by the calling user alone. Omit to ' +
+        'stamp the credential\'s full identity — the default. `org:`/`client:` entries are equivalent to ' +
+        'the orgId/clientId fields.',
+    ),
 };
 
 const recordCreate: ToolFactory = ({ client, log }) => ({
@@ -69,11 +80,12 @@ const recordCreate: ToolFactory = ({ client, log }) => ({
           payload: args.fields as Record<string, unknown>,
           externalId: args.externalId as string | undefined,
           indexMode: args.indexMode as 'HYBRID' | 'SEMANTIC' | 'TEXT' | 'NONE' | undefined,
-          status: args.status as string | undefined,
+          status: args.status as Vectros.RecordRequest.Status | undefined,
           folderId: args.folderId as string | undefined,
           userId: args.userId as string | undefined,
           orgId: args.orgId as string | undefined,
           clientId: args.clientId as string | undefined,
+          scopes: args.scopes as string[] | undefined,
         },
       });
       log.debug({ tool: 'record_create', type, id: created.id }, 'record_create ok');

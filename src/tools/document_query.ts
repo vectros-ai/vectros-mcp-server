@@ -15,21 +15,27 @@
  * lookup fields (the GET variant 400s — the value can't ride the URL), and never
  * leaks values into access/proxy logs. One path, no GET/POST branching.
  *
- * MCP-specific limits (smaller than the API defaults): default 3 / max 10 —
- * document metadata injects directly into the agent context window (token
- * economy). The MCP `limit` is the cap: one page, at most `limit` documents.
+ * Result limits + pagination (the enumeration-limits contract, applied to every enumeration tool):
+ *   • DEFAULT 3 — a low ceiling that protects the agent context window, since document
+ *     metadata injects directly into it (token economy).
+ *   • MAX 100 — the documents API max. Raise `limit` to pull a larger page in one call
+ *     when you can accept the context cost; you are never forced to paginate.
+ *   • PAGINATION — both list and lookup are cursor-paged. The result is the
+ *     `{ data, nextCursor }` envelope; pass `nextCursor` back as `startFrom` for the next page.
+ *   • MORE-REMAINS SIGNAL — a non-null `nextCursor` means more documents may remain; null
+ *     means this was the last page. Never a silent cut.
  *
- * The `{ data, nextCursor }` page envelope (DocumentPage / DocumentLookupPage)
- * unwraps to the bare `DocumentResponse[]` via `pageItems`.
+ * The `{ data, nextCursor }` page envelope (DocumentPage / DocumentLookupPage) is surfaced
+ * directly so the cursor reaches the agent — matching folder_query / version_history.
  */
 import { z } from 'zod';
 import type { Vectros } from '@vectros-ai/sdk';
 import type { ToolFactory, ToolResult } from './types.js';
 import { toolError } from './errors.js';
-import { pageItems } from '../paging.js';
+import { pageItems, type Page } from '../paging.js';
 
 const MCP_DEFAULT_LIMIT = 3;
-const MCP_MAX_LIMIT = 10;
+const MCP_MAX_LIMIT = 100;
 
 const inputSchema = {
   // Lookup-mode args — provide `field` plus EXACTLY ONE of: value | from+to | prefix.
@@ -69,6 +75,18 @@ const inputSchema = {
   userId: z.string().optional().describe('List mode: scope to documents owned by this user.'),
   orgId: z.string().optional().describe('List mode: scope to documents belonging to this org.'),
   clientId: z.string().optional().describe('List mode: scope to documents associated with this client.'),
+  scope: z
+    .string()
+    .optional()
+    .describe(
+      'List mode: filter to documents carrying this scope value, in `namespace:value` form ' +
+        '(e.g. "org:<uuid>", "group:eng-team"). `scope=org:<id>`/`scope=client:<id>` are equivalent ' +
+        'to the orgId/clientId filters.',
+    ),
+  startFrom: z
+    .string()
+    .optional()
+    .describe('Pagination cursor — pass the `nextCursor` from the previous page to fetch the next. Works in both list and lookup mode.'),
   limit: z
     .number()
     .int()
@@ -76,8 +94,9 @@ const inputSchema = {
     .max(MCP_MAX_LIMIT)
     .optional()
     .describe(
-      `Max documents to return. MCP-specific cap of ${MCP_MAX_LIMIT} (vs API max of 100) ` +
-        'to protect the agent context window. Default 3.',
+      `Max documents per page. Defaults to a low ${MCP_DEFAULT_LIMIT} to protect the agent context ` +
+        `window; raise up to ${MCP_MAX_LIMIT} (the documents API max) in one call when you can accept the ` +
+        'larger payload, or page with `startFrom` instead.',
     ),
 };
 
@@ -89,8 +108,10 @@ const documentQuery: ToolFactory = ({ client, log }) => ({
     '  • Lookup on a lookup-indexed field: pass `type` and `field` plus exactly one of ' +
     '`value` (exact), `from`+`to` (range), or `prefix`. Works on sensitive fields ' +
     '(equality only there); range/prefix need a range-enabled field.\n' +
-    '  • List: omit `field`; optionally filter by `folderId`/`userId`/`orgId`/`clientId`.\n' +
-    'Returns up to 10 documents (default 3) as a bare array. Mode is auto-detected. ' +
+    '  • List: omit `field`; optionally filter by `folderId`/`userId`/`orgId`/`clientId`/`scope`.\n' +
+    'Returns a `{ data, nextCursor }` page: `data` holds up to `limit` documents (default 3, max 100 — ' +
+    'raise it in one call when you can accept the payload), and a non-null `nextCursor` means more remain — ' +
+    'pass it back as `startFrom` to page. Mode is auto-detected. ' +
     'Use document_get for the full text/download URL of one document.',
   inputSchema,
   handler: async (args): Promise<ToolResult> => {
@@ -101,8 +122,9 @@ const documentQuery: ToolFactory = ({ client, log }) => ({
     const to = args.to as string | undefined;
     const prefix = args.prefix as string | undefined;
     const type = args.type as string | undefined;
+    const startFrom = args.startFrom as string | undefined;
     try {
-      let documents: Vectros.DocumentResponse[];
+      let page: Page<Vectros.DocumentResponse>;
       if (field) {
         // Lookup mode — validate exactly one lookup shape, then require `type`.
         const hasEquality = value !== undefined;
@@ -133,7 +155,7 @@ const documentQuery: ToolFactory = ({ client, log }) => ({
           );
         }
         // POST-body lookup: sensitive-safe (value never in the URL), all modes in one path.
-        const page = await client.documents.lookupDocumentsByBody({
+        page = await client.documents.lookupDocumentsByBody({
           type,
           field,
           value,
@@ -141,29 +163,32 @@ const documentQuery: ToolFactory = ({ client, log }) => ({
           to,
           prefix,
           order: args.order as 'asc' | 'desc' | undefined,
+          startFrom,
           limit,
         });
-        documents = pageItems(page);
         log.debug(
-          { tool: 'document_query', mode: 'lookup', type, field, returned: documents.length },
+          { tool: 'document_query', mode: 'lookup', type, field, returned: pageItems(page).length },
           'document_query lookup ok',
         );
       } else {
         // List mode — filter by folder + ownership.
-        const page = await client.documents.listDocuments({
+        page = await client.documents.listDocuments({
           folderId: args.folderId as string | undefined,
           userId: args.userId as string | undefined,
           orgId: args.orgId as string | undefined,
           clientId: args.clientId as string | undefined,
+          scope: args.scope as string | undefined,
+          startFrom,
           limit,
         });
-        documents = pageItems(page);
         log.debug(
-          { tool: 'document_query', mode: 'list', limit, returned: documents.length },
+          { tool: 'document_query', mode: 'list', limit, returned: pageItems(page).length },
           'document_query list ok',
         );
       }
-      return { content: [{ type: 'text', text: JSON.stringify(documents, null, 2) }] };
+      const documents = pageItems(page);
+      const nextCursor = page.nextCursor ?? null;
+      return { content: [{ type: 'text', text: JSON.stringify({ data: documents, nextCursor }, null, 2) }] };
     } catch (err) {
       log.warn({ tool: 'document_query', err: String(err) }, 'document_query failed');
       return toolError('document_query', err);

@@ -11,9 +11,11 @@
  *                truncating the tree would lose folders with no way to reach
  *                them. Pass the returned `nextCursor` back as `startFrom`.
  *
- * MCP-specific limit (smaller than the API default): default 10 / max 50 —
- * folder rows are small (no payload), so the cap is looser than records/docs
- * but still bounded for the agent context window.
+ * Result limits + pagination (the enumeration-limits contract): default 10 (folder rows are small —
+ * no payload — so the default is looser than records/docs) / max 100 (the folders API
+ * max; raise `limit` in one call when you can accept the larger page). The cursor is
+ * already exposed, so an agent can also page: pass the returned `nextCursor` as `startFrom`,
+ * and a non-null `nextCursor` is the more-remains signal.
  */
 import { z } from 'zod';
 import type { Vectros } from '@vectros-ai/sdk';
@@ -22,7 +24,7 @@ import { toolError } from './errors.js';
 import { pageItems } from '../paging.js';
 
 const MCP_DEFAULT_LIMIT = 10;
-const MCP_MAX_LIMIT = 50;
+const MCP_MAX_LIMIT = 100;
 
 const inputSchema = {
   id: z.string().optional().describe('Get mode: fetch this single folder by id.'),
@@ -43,7 +45,10 @@ const inputSchema = {
     .min(1)
     .max(MCP_MAX_LIMIT)
     .optional()
-    .describe(`List mode: max folders to return. MCP cap of ${MCP_MAX_LIMIT} (vs API 100). Default 10.`),
+    .describe(
+      `List mode: max folders per page. Default 10; raise up to ${MCP_MAX_LIMIT} (the folders API max) ` +
+        'in one call when you can accept the larger page, or page with `startFrom`.',
+    ),
 };
 
 const folderQuery: ToolFactory = ({ client, log }) => ({
@@ -54,8 +59,9 @@ const folderQuery: ToolFactory = ({ client, log }) => ({
     '  • Get: pass `id` → returns the single folder.\n' +
     '  • List: omit `id`; pass `parentId` for a folder\'s direct children (tree navigation) or omit for a ' +
     'flat tenant list. Optionally filter by `userId`/`orgId`/`clientId`.\n' +
-    'List mode returns `{ data, nextCursor }` (default 10, max 50 per page); pass `nextCursor` back as ' +
-    '`startFrom` to page through all folders. Get mode returns the single folder object.',
+    'List mode returns `{ data, nextCursor }` (default 10, max 100 per page — raise it in one call when you ' +
+    'can accept the larger page); a non-null `nextCursor` means more remain — pass it back as `startFrom` to ' +
+    'page through all folders. Get mode returns the single folder object.',
   inputSchema,
   handler: async (args): Promise<ToolResult> => {
     const id = args.id as string | undefined;

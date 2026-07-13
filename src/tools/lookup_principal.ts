@@ -22,6 +22,12 @@
  * Read-only: requires the credential to allow the relevant read scope
  * (`users:r` / `orgs:r` / `clients:r`). It never creates or mutates identities —
  * identity CRUD stays off the agent tool surface by design.
+ *
+ * Result limits + pagination (the enumeration-limits contract): default 10 / max 100 (the principals
+ * API max — raise `limit` in one call when you can accept the payload). The result is the
+ * `{ data, nextCursor }` envelope; a non-null `nextCursor` means more principals may remain
+ * — pass it back as `startFrom` to page. Resolve mode returns at most one match, so its
+ * cursor is always null.
  */
 import { z } from 'zod';
 import type { ToolFactory, ToolResult } from './types.js';
@@ -29,7 +35,7 @@ import { toolError } from './errors.js';
 import { pageItems, type Page } from '../paging.js';
 
 const MCP_DEFAULT_LIMIT = 10;
-const MCP_MAX_LIMIT = 50;
+const MCP_MAX_LIMIT = 100;
 
 const inputSchema = {
   kind: z
@@ -63,13 +69,20 @@ const inputSchema = {
     .enum(['asc', 'desc'])
     .optional()
     .describe('Lookup mode: sort direction by the looked-up field. `asc` (default) or `desc`.'),
+  startFrom: z
+    .string()
+    .optional()
+    .describe('Lookup mode: pagination cursor — pass the `nextCursor` from the previous page to fetch the next.'),
   limit: z
     .number()
     .int()
     .min(1)
     .max(MCP_MAX_LIMIT)
     .optional()
-    .describe(`Max principals to return. MCP cap of ${MCP_MAX_LIMIT} (vs API 100). Default ${MCP_DEFAULT_LIMIT}.`),
+    .describe(
+      `Max principals per page. Defaults to ${MCP_DEFAULT_LIMIT}; raise up to ${MCP_MAX_LIMIT} (the ` +
+        'principals API max) in one call when you can accept the payload, or page with `startFrom`.',
+    ),
 };
 
 const lookupPrincipal: ToolFactory = ({ client, log }) => ({
@@ -81,7 +94,8 @@ const lookupPrincipal: ToolFactory = ({ client, log }) => ({
     'ownership filters on record_query / hybrid_search / rag_ask expect).\n' +
     '  • Lookup by a schema field: pass `type` and `field` plus exactly one of `value` (exact), `from`+`to` ' +
     '(range), or `prefix`. Sensitive-field-safe. (If both `externalId` and a `field` lookup are given, ' +
-    '`externalId` wins.) Returns up to 50 principals (default 10) as a bare array. ' +
+    '`externalId` wins.) Returns a `{ data, nextCursor }` page (default 10, max 100 — raise it in one call ' +
+    'when you can accept the payload); a non-null `nextCursor` means more remain — pass it back as `startFrom`. ' +
     'Read-only — does not create or modify identities.',
   inputSchema,
   handler: async (args): Promise<ToolResult> => {
@@ -95,12 +109,14 @@ const lookupPrincipal: ToolFactory = ({ client, log }) => ({
     const to = args.to as string | undefined;
     const prefix = args.prefix as string | undefined;
     const order = args.order as 'asc' | 'desc' | undefined;
+    const startFrom = args.startFrom as string | undefined;
 
     try {
       let page: Page<unknown>;
       if (externalId !== undefined) {
         // Resolve mode — externalId → UUID. One SDK call per kind (the request
-        // shapes differ per kind but all accept externalId + limit).
+        // shapes differ per kind but all accept externalId + limit). A resolve
+        // matches at most one principal, so nextCursor is always null here.
         if (kind === 'user') {
           page = await client.identity.listUsers({ externalId, limit });
         } else if (kind === 'org') {
@@ -137,7 +153,7 @@ const lookupPrincipal: ToolFactory = ({ client, log }) => ({
           );
         }
         // POST-body lookup: sensitive-safe (value never in the URL), all modes in one path.
-        const req = { type, field, value, from, to, prefix, order, limit };
+        const req = { type, field, value, from, to, prefix, order, startFrom, limit };
         if (kind === 'user') {
           page = await client.identity.lookupUsers(req);
         } else if (kind === 'org') {
@@ -154,7 +170,8 @@ const lookupPrincipal: ToolFactory = ({ client, log }) => ({
       }
 
       const principals = pageItems(page);
-      return { content: [{ type: 'text', text: JSON.stringify(principals, null, 2) }] };
+      const nextCursor = page.nextCursor ?? null;
+      return { content: [{ type: 'text', text: JSON.stringify({ data: principals, nextCursor }, null, 2) }] };
     } catch (err) {
       log.warn({ tool: 'lookup_principal', kind, err: String(err) }, 'lookup_principal failed');
       return toolError('lookup_principal', err);

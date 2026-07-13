@@ -13,24 +13,29 @@
  * can't ride the URL query string), and never leaks values into access/proxy
  * logs. One path, no GET/POST branching, no sensitivity sniffing.
  *
- * MCP-specific limits (smaller than the API defaults): default 3 / max 10 —
- * records inject directly into the agent context window (token economy; see
- * the design doc § "Token economy"). The MCP `limit` is the cap:
- * one page returns at most `limit` records, so there is no hidden truncation
- * beyond the documented ceiling. Cursor pagination past the first page is
- * intentionally not exposed.
+ * Result limits + pagination (the enumeration-limits contract, applied to every enumeration tool):
+ *   • DEFAULT 3 — a low ceiling that protects the agent context window, since records
+ *     inject directly into it (token economy; see the design doc § "Token economy").
+ *   • MAX 100 — the records API max. An agent that accepts the context cost can raise
+ *     `limit` to pull a larger page in a single call; it is never forced to paginate.
+ *   • PAGINATION — both list and lookup are cursor-paged. The result is the
+ *     `{ data, nextCursor }` envelope; pass the returned `nextCursor` back as
+ *     `startFrom` to fetch the next page.
+ *   • MORE-REMAINS SIGNAL — a non-null `nextCursor` means the page filled and more
+ *     records may remain; null means this was the last page. Never a silent cut.
  *
- * SDK 0.23 returns the `{ data, nextCursor }` page envelope; we unwrap to the
- * bare `RecordResponse[]` (the v0.1/v0.2 agent contract) via `pageItems`.
+ * SDK 0.23 returns the `{ data, nextCursor }` page envelope for both `listRecords`
+ * and `lookupRecordsByBody`; we surface it directly (rather than unwrapping to a bare
+ * array) so the cursor reaches the agent — matching folder_query / version_history.
  */
 import { z } from 'zod';
 import type { Vectros } from '@vectros-ai/sdk';
 import type { ToolFactory, ToolResult } from './types.js';
 import { toolError } from './errors.js';
-import { pageItems } from '../paging.js';
+import { pageItems, type Page } from '../paging.js';
 
 const MCP_DEFAULT_LIMIT = 3;
-const MCP_MAX_LIMIT = 10;
+const MCP_MAX_LIMIT = 100;
 
 const inputSchema = {
   type: z
@@ -70,6 +75,18 @@ const inputSchema = {
   userId: z.string().optional().describe('List mode: scope to records owned by this user.'),
   orgId: z.string().optional().describe('List mode: scope to records owned by this org.'),
   clientId: z.string().optional().describe('List mode: scope to records associated with this client.'),
+  scope: z
+    .string()
+    .optional()
+    .describe(
+      'List mode: filter to records carrying this scope value, in `namespace:value` form ' +
+        '(e.g. "org:<uuid>", "group:eng-team"). `scope=org:<id>`/`scope=client:<id>` are equivalent ' +
+        'to the orgId/clientId filters.',
+    ),
+  startFrom: z
+    .string()
+    .optional()
+    .describe('Pagination cursor — pass the `nextCursor` from the previous page to fetch the next. Works in both list and lookup mode.'),
   limit: z
     .number()
     .int()
@@ -77,8 +94,9 @@ const inputSchema = {
     .max(MCP_MAX_LIMIT)
     .optional()
     .describe(
-      `Max records to return. MCP-specific cap of ${MCP_MAX_LIMIT} (vs API max of 100) ` +
-        'to protect the agent context window. Default 3.',
+      `Max records per page. Defaults to a low ${MCP_DEFAULT_LIMIT} to protect the agent context ` +
+        `window; raise up to ${MCP_MAX_LIMIT} (the records API max) in one call when you can accept the ` +
+        'larger payload, or page with `startFrom` instead.',
     ),
 };
 
@@ -90,7 +108,9 @@ const recordQuery: ToolFactory = ({ client, log }) => ({
     '  • Lookup on a lookup-indexed field: pass `field` plus exactly one of `value` (exact), ' +
     '`from`+`to` (range), or `prefix`. Works on sensitive fields too.\n' +
     '  • List by type: omit `field`; optionally filter by `userId`/`orgId`/`clientId`.\n' +
-    'Returns up to 10 records (default 3). Mode is auto-detected from the arguments present.',
+    'Returns a `{ data, nextCursor }` page: `data` holds up to `limit` records (default 3, max 100 — ' +
+    'raise it in one call when you can accept the payload), and a non-null `nextCursor` means more remain — ' +
+    'pass it back as `startFrom` to page. Mode is auto-detected from the arguments present.',
   inputSchema,
   handler: async (args): Promise<ToolResult> => {
     const limit = (args.limit as number | undefined) ?? MCP_DEFAULT_LIMIT;
@@ -100,8 +120,9 @@ const recordQuery: ToolFactory = ({ client, log }) => ({
     const from = args.from as string | undefined;
     const to = args.to as string | undefined;
     const prefix = args.prefix as string | undefined;
+    const startFrom = args.startFrom as string | undefined;
     try {
-      let records: Vectros.RecordResponse[];
+      let page: Page<Vectros.RecordResponse>;
       if (field) {
         // Lookup mode — validate exactly one lookup shape was supplied.
         const hasEquality = value !== undefined;
@@ -126,7 +147,7 @@ const recordQuery: ToolFactory = ({ client, log }) => ({
           return toolError('record_query', new Error("range lookup requires both 'from' and 'to'."));
         }
         // POST-body lookup: sensitive-safe (value never in the URL), all modes in one path.
-        const page = await client.records.lookupRecordsByBody({
+        page = await client.records.lookupRecordsByBody({
           type,
           field,
           value,
@@ -134,30 +155,33 @@ const recordQuery: ToolFactory = ({ client, log }) => ({
           to,
           prefix,
           order: args.order as 'asc' | 'desc' | undefined,
+          startFrom,
           limit,
         });
-        records = pageItems(page);
         log.debug(
-          { tool: 'record_query', mode: 'lookup', type, field, returned: records.length },
+          { tool: 'record_query', mode: 'lookup', type, field, returned: pageItems(page).length },
           'record_query lookup ok',
         );
       } else {
         // List mode — filter by ownership + type.
-        const page = await client.records.listRecords({
+        page = await client.records.listRecords({
           type,
           userId: args.userId as string | undefined,
           orgId: args.orgId as string | undefined,
           clientId: args.clientId as string | undefined,
+          scope: args.scope as string | undefined,
+          startFrom,
           limit,
         });
-        records = pageItems(page);
         log.debug(
-          { tool: 'record_query', mode: 'list', type, limit, returned: records.length },
+          { tool: 'record_query', mode: 'list', type, limit, returned: pageItems(page).length },
           'record_query list ok',
         );
       }
+      const records = pageItems(page);
+      const nextCursor = page.nextCursor ?? null;
       return {
-        content: [{ type: 'text', text: JSON.stringify(records, null, 2) }],
+        content: [{ type: 'text', text: JSON.stringify({ data: records, nextCursor }, null, 2) }],
       };
     } catch (err) {
       log.warn({ tool: 'record_query', err: String(err) }, 'record_query failed');

@@ -1,17 +1,15 @@
 /**
  * hybrid_search — wraps `client.search.content(...)` → `POST /v1/search`.
  *
- * MCP-specific limits (smaller than the underlying API defaults):
- *   default limit = 3
- *   max limit     = 10
+ * Result limits + pagination (the enumeration-limits contract):
+ *   default limit = 3   — a low ceiling: a tool result injects directly into the LLM
+ *                         context window, and contextText-heavy hits are ~1k tokens each.
+ *   max limit     = 50  — the search API max (the engine caps a page at 50). Raise `limit`
+ *                         to pull more in one call when you can accept the cost; the
+ *                         per-response byte budget still trims an oversized tail.
  *
- * Why: a tool's JSON result is injected directly into the LLM's
- * context window. The API default of 10 hits × ~1k tokens of
- * contextText each = 10k tokens injected per call. With the API max
- * of 50, that's 50k tokens — blows past most model windows and costs
- * the user a fortune. See the design doc § "Token economy".
- *
- * Agents that need more results paginate via `offset`.
+ * Pagination is via `offset`; `totalResults` (the full matching pool) drives an explicit
+ * `hasMore` flag so an agent knows when more results remain past the current page.
  */
 import { z } from 'zod';
 import type { Vectros } from '@vectros-ai/sdk';
@@ -19,7 +17,7 @@ import type { ToolFactory, ToolResult } from './types.js';
 import { toolError } from './errors.js';
 
 const MCP_DEFAULT_LIMIT = 3;
-const MCP_MAX_LIMIT = 10;
+const MCP_MAX_LIMIT = 50;
 // Keep a single tool-result well under a typical MCP client's result cap so one search can't blow the
 // agent's context window. contextText (the broad passage per hit) is the heavy part and is omitted by
 // default (opt in with includeContext); this budget is the backstop for everything else. Measured as
@@ -83,10 +81,11 @@ const inputSchema = {
     .max(MCP_MAX_LIMIT)
     .optional()
     .describe(
-      `Max hits to return. MCP-specific cap of ${MCP_MAX_LIMIT} (vs API max of 50) to protect ` +
-        'the agent context window. Default 3. Use offset for pagination.',
+      `Max hits per page. Defaults to a low ${MCP_DEFAULT_LIMIT} to protect the agent context ` +
+        `window; raise up to ${MCP_MAX_LIMIT} (the most a single search returns) in one call when you can ` +
+        'accept the larger result, or page with `offset` instead.',
     ),
-  offset: z.number().int().min(0).optional().describe('Skip the first N hits — for pagination.'),
+  offset: z.number().int().min(0).max(200).optional().describe('Skip the first N hits — for pagination (0–200).'),
   folderId: z.string().optional().describe('Scope to content in this EXACT folder (Vectros folder id).'),
   rootFolderId: z
     .string()
@@ -116,6 +115,13 @@ const inputSchema = {
   userId: z.string().optional().describe('Restrict to content owned by this user (Vectros UUID).'),
   orgId: z.string().optional().describe('Restrict to content belonging to this org (Vectros UUID).'),
   clientId: z.string().optional().describe('Restrict to content associated with this client (Vectros UUID).'),
+  scope: z
+    .string()
+    .optional()
+    .describe(
+      'Restrict to content carrying this scope value, in `namespace:value` form (e.g. "org:<uuid>", ' +
+        '"group:eng-team"). `scope=org:<id>`/`scope=client:<id>` are equivalent to the orgId/clientId filters.',
+    ),
   // Date window.
   createdAfter: z
     .string()
@@ -163,15 +169,18 @@ const hybridSearch: ToolFactory = ({ client, log }) => ({
   name: 'hybrid_search',
   title: 'Hybrid search',
   description:
-    'Search the partner tenant\'s indexed content (documents + structured records) using hybrid BM25 + dense ranking. ' +
-    'Returns up to 10 results (default 3) with citations and surrounding context for grounding follow-up reasoning. ' +
+    'Search your tenant\'s indexed content (documents + structured records) using hybrid BM25 + dense ranking. ' +
+    'Returns up to `limit` results (default 3, max 50 — raise it in one call when you can accept the larger result) ' +
+    'with citations and surrounding context for grounding follow-up reasoning. ' +
     'Narrow with contentTypes/typeName/filters, ownership (userId/orgId/clientId), folder scope, a created date window, ' +
     'keyword precision (textMode OR/AND/PHRASE), relevance floors (minSimilarity/minTextRelevance), uniqueDocuments, ' +
     'and requireComplete (fail closed on a degraded backend). Tenant-isolated; the caller\'s scoped key fully ' +
     'constrains which content is visible. ARCHIVED (soft-retracted) documents never appear in results — fetch ' +
     'them by id via document_get, or restore them via document_update. To stay within the agent context window each hit returns its matched ' +
     'chunkText + a short snippet by default; set includeContext:true for the broader surrounding passage. If the ' +
-    'whole result would be too large it is truncated to the top hits (truncated:true). textLegEmpty:true flags that ' +
+    'whole result would be too large it is truncated to the top hits (truncated:true). totalResults is the full ' +
+    'matching pool and hasMore:true means results remain past this page — raise limit or advance offset to fetch them. ' +
+    'textLegEmpty:true flags that ' +
     'the keyword leg matched nothing (all textScores 0) — usually a too-long PHRASE query; retry with textMode:"OR".',
   inputSchema,
   handler: async (args): Promise<ToolResult> => {
@@ -192,6 +201,7 @@ const hybridSearch: ToolFactory = ({ client, log }) => ({
         userId: args.userId as string | undefined,
         orgId: args.orgId as string | undefined,
         clientId: args.clientId as string | undefined,
+        scope: args.scope as string | undefined,
         createdAfter: args.createdAfter as string | undefined,
         createdBefore: args.createdBefore as string | undefined,
         minSimilarity: args.minSimilarity as number | undefined,
@@ -229,6 +239,18 @@ const hybridSearch: ToolFactory = ({ client, log }) => ({
         envelope.results = shaped;
         envelope.truncated = true;
         envelope.returnedResults = shaped.length;
+        text = JSON.stringify(envelope, null, 2);
+      }
+
+      // Explicit more-remains signal: totalResults is the full matching pool. Computed from the
+      // FINAL returned count (after any size-budget truncation) so it is the single authoritative "there
+      // is more to fetch" flag — it fires whenever the agent hasn't seen the whole pool, whether the
+      // shortfall is the `limit` ceiling, the `offset` window, or a locally-trimmed tail. Advance `offset`
+      // (or raise `limit`) to fetch the rest. Only asserted when the backend reported totalResults.
+      const offset = (args.offset as number | undefined) ?? 0;
+      const totalResults = (result as { totalResults?: unknown }).totalResults;
+      if (typeof totalResults === 'number' && offset + shaped.length < totalResults) {
+        envelope.hasMore = true;
         text = JSON.stringify(envelope, null, 2);
       }
 

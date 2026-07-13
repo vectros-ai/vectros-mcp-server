@@ -3,6 +3,64 @@
 All notable changes to `@vectros-ai/mcp-server` are documented here.
 This project adheres to [Semantic Versioning](https://semver.org).
 
+## 0.9.0
+
+### Added
+
+- **Ownership scopes on writes.** `record_create`, `document_ingest`, and `folder_create`
+  accept a `scopes` array of `namespace:value` entries (at most 2 — e.g.
+  `["org:<uuid>", "group:eng-team"]`), declaring the item's complete scope ownership
+  from the credential's own identity. An empty array (`[]`) creates a **private**,
+  user-owned item — the building block for per-user agent memory alongside shared
+  team content. Omit the field to keep today's behavior (the credential's full
+  identity is stamped).
+- **`scope` filter on reads and retrieval.** `record_query` and `document_query`
+  (list mode), `hybrid_search`, and `rag_ask` retrieval accept a `scope` filter in the
+  same `namespace:value` form, confining results — or a grounded answer's corpus — to
+  one scope. `scope=org:<id>` / `scope=client:<id>` are equivalent to the existing
+  `orgId`/`clientId` filters.
+
+## 0.8.1 — 2026-07-10
+
+### Changed
+
+- **Dependency maintenance** — repinned the bundled `@vectros-ai/sdk` to `0.34.0`
+  (additive `scopes` read-back on record/document/folder responses, plus webhooks).
+  The server bundles the SDK into its published output, so this is a rebuild against
+  the current SDK; no tool behavior changes.
+
+## 0.8.0 — 2026-07-10
+
+Larger result limits and real pagination across every enumeration tool — no tool
+forces you to accept a hard ceiling you can't get past.
+
+### Changed
+
+- **Higher `limit` ceilings, up to each API's max.** Every enumeration tool keeps a low
+  default (context protection) but now lets you raise `limit` in a single call when you
+  can accept the larger payload: `record_query` and `document_query` max **10 → 100**;
+  `hybrid_search` max **10 → 50**; `rag_ask`'s grounding-corpus limit max **10 → 50**;
+  `lookup_principal` max **50 → 100**; `folder_query` max **50 → 100**. Heavy
+  passages/payloads already auto-truncate, so a high limit is safe.
+- **Pagination on every enumeration tool, with an explicit "more remains" signal.**
+  - `record_query`, `document_query`, and `lookup_principal` now return a
+    `{ data, nextCursor }` page and accept a `startFrom` cursor. **This is a shape change**
+    — these tools previously returned a bare array. A non-null `nextCursor` means more
+    results remain; pass it back as `startFrom` to page. (This matches `folder_query` and
+    `version_history`, which already worked this way.)
+  - `hybrid_search` keeps `offset` pagination and now adds an explicit `hasMore` flag
+    (derived from `totalResults`) so you know when results remain past the current page.
+- **Tool descriptions refreshed** to state the real max, that raising it is the agent's
+  context-cost call, and how to page.
+
+## 0.7.1 — 2026-07-09
+
+### Changed
+
+- **`rag_ask` model examples updated.** The `model` parameter description now lists
+  `claude-sonnet-5`; the earlier `claude-sonnet-4-6` alias has been retired. Call
+  `GET /v1/models` for the current inference catalog your key can reach.
+
 ## 0.7.0 — 2026-07-05
 
 Text-retention control that works, and tool descriptions that tell the truth

@@ -71,7 +71,7 @@ const recordUpdate: ToolFactory = ({ client, log }) => ({
     const externalId = args.externalId as string | undefined;
     const type = args.type as string | undefined;
     const fields = args.fields as Record<string, unknown>;
-    const status = args.status as string | undefined;
+    const status = args.status as Vectros.RecordRequest.Status | undefined;
     const expectedVersion = args.expectedVersion as number | undefined;
     try {
       const resolved = await resolveRecordIdByExternalId(client, { id, externalId, type });
