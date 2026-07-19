@@ -61,15 +61,13 @@ const inputSchema = {
       // answer on a specific owner / folder / type / metadata subset, not just the
       // whole-tenant corpus.
       userId: z.string().optional().describe('Restrict retrieval to content owned by this user (Vectros UUID).'),
-      orgId: z.string().optional().describe('Restrict retrieval to content owned by this org (Vectros UUID).'),
-      clientId: z.string().optional().describe('Restrict retrieval to content tagged with this client (Vectros UUID).'),
       scope: z
         .string()
         .optional()
         .describe(
           'Restrict retrieval to content carrying this scope value, in `namespace:value` form ' +
-            '(e.g. "org:<uuid>", "group:eng-team"). `scope=org:<id>`/`scope=client:<id>` are equivalent ' +
-            'to the orgId/clientId filters.',
+            '(e.g. "org:<uuid>", "client:<uuid>", "group:eng-team"). `org` and `client` are built-in ' +
+            'namespaces; others are custom scopes you define.',
         ),
       folderId: z.string().optional().describe('Restrict retrieval to this exact folder.'),
       rootFolderId: z.string().optional().describe('Restrict retrieval to this folder and all its descendants.'),
@@ -121,8 +119,6 @@ const ragAsk: ToolFactory = ({ client, log }) => ({
         mode?: 'HYBRID' | 'TEXT' | 'SEMANTIC';
         limit?: number;
         userId?: string;
-        orgId?: string;
-        clientId?: string;
         scope?: string;
         folderId?: string;
         rootFolderId?: string;
@@ -137,8 +133,6 @@ const ragAsk: ToolFactory = ({ client, log }) => ({
         mode: searchArg.mode ?? 'HYBRID',
         limit: searchArg.limit ?? SEARCH_MCP_DEFAULT_LIMIT,
         userId: searchArg.userId,
-        orgId: searchArg.orgId,
-        clientId: searchArg.clientId,
         scope: searchArg.scope,
         folderId: searchArg.folderId,
         rootFolderId: searchArg.rootFolderId,

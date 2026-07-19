@@ -242,7 +242,7 @@ Two read-only resources for ambient context (no tool call required):
 Use a **scoped permanent API key** (`ssk_*`), not a root key (`sk_*`).
 
 A scoped key is bound to a narrowed `AccessProfile` — e.g. read-only
-across one `orgId`. If your MCP install is compromised, the blast
+across one org scope (`scope:org`). If your MCP install is compromised, the blast
 radius is whatever the profile allows, not the whole tenant. The
 server emits a `warn` log line on startup when you pass a wildcard
 `sk_*` for exactly this reason.
@@ -259,11 +259,42 @@ AccessProfile for MCP") for least-privilege credential setup — the
 `vectros bootstrap` flow provisions a scoped `ssk_*` key and its AccessProfile
 in one command.
 
+## Credential resolution
+
+The server resolves its API key from the first source that yields one:
+
+1. **`VECTROS_API_KEY`** — always wins when set.
+2. **The `vectros` CLI keyring** — if the key is unset and
+   [`@vectros-ai/cli`](https://www.npmjs.com/package/@vectros-ai/cli) **0.9.0+** is on
+   your `PATH`, the server runs `vectros keyring show --format raw` as a subprocess
+   and uses the key it prints. By default that is your **active** identity; set
+   `VECTROS_KEYRING_ALIAS` to pick a specific entry. This is the same pattern as
+   `git credential` / `docker-credential-*` / `aws credential_process`: the key
+   lives in one place, and the server, your scripts, and your agent hooks all read
+   it from there instead of each keeping a plaintext copy that drifts.
+3. **Neither** — startup fails with a message naming both options.
+
+The resolved key is held in memory and never logged. Startup logs which alias it
+resolved (not the key), so you can tell at a glance which identity the server is
+running as — `vectros keyring doctor` shows the same view.
+
+> **Startup warns when it picks an identity you didn't name.** If `VECTROS_API_KEY`
+> is unset and no `VECTROS_KEYRING_ALIAS` is set, the server falls back to your
+> **active** keyring entry and logs a warning — it is running as whatever identity
+> `vectros switch` last selected, which may be a `ssk_live_*` key acting on real data
+> or a `ssk_test_*` one that isn't. Either can be an unwelcome surprise, because a
+> blank placeholder (`"VECTROS_API_KEY": ""` in a client config, or `-e VECTROS_API_KEY`
+> passing through an unset var in Docker) reads as "not configured yet" but resolves
+> like an unset key. Nothing is blocked — name an entry with `VECTROS_KEYRING_ALIAS`,
+> or set `VECTROS_API_KEY`, and the warning goes away. `vectros keyring doctor` shows
+> which entry is active and which of your keys are live.
+
 ## Environment variables
 
 | Var | Required | Default | Purpose |
 |---|---|---|---|
-| `VECTROS_API_KEY` | **yes** | — | Vectros API key. Accepts `sk_*` / `ssk_*` / `st_*`; `ssk_*` recommended. |
+| `VECTROS_API_KEY` | no\* | — | Vectros API key. Accepts `sk_*` / `ssk_*` / `st_*`; `ssk_*` recommended. \*Required **unless** the `vectros` CLI is installed with a usable keyring entry — see [Credential resolution](#credential-resolution). Takes precedence when set. |
+| `VECTROS_KEYRING_ALIAS` | no | (the active entry) | Resolve this `vectros` keyring entry instead of the active one. Ignored when `VECTROS_API_KEY` is set. |
 | `VECTROS_API_BASE_URL` | no | `https://api.vectros.ai` | Override for staging or other envs. Validated: must be `https://` (or `http://` to localhost) and an official `*.vectros.ai` host. |
 | `VECTROS_ALLOW_INSECURE_BASE_URL` | no | — | Set `1` to bypass the base-URL allow-list (e.g. a trusted local proxy). **Not recommended** — sends your key to an unvalidated host; logs a warning. |
 | `VECTROS_MCP_INGEST_ROOT` | no | process cwd | Directory `document_ingest`'s `filePath` mode is jailed to. Paths escaping it (traversal/absolute/symlink) or matching a sensitive pattern are rejected. |
@@ -310,7 +341,7 @@ Health probe lives at `GET /healthz` (always unauthenticated, k8s
 readiness-friendly).
 
 Current limitation: the server uses one upstream credential per process
-(the env `VECTROS_API_KEY`). Per-request credential override via the
+(the key resolved at startup). Per-request credential override via the
 incoming Authorization header is a planned enhancement. For now, deploy one
 server per credential boundary you want.
 

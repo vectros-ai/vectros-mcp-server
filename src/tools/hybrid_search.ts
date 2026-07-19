@@ -113,14 +113,13 @@ const inputSchema = {
     ),
   // Ownership.
   userId: z.string().optional().describe('Restrict to content owned by this user (Vectros UUID).'),
-  orgId: z.string().optional().describe('Restrict to content belonging to this org (Vectros UUID).'),
-  clientId: z.string().optional().describe('Restrict to content associated with this client (Vectros UUID).'),
   scope: z
     .string()
     .optional()
     .describe(
       'Restrict to content carrying this scope value, in `namespace:value` form (e.g. "org:<uuid>", ' +
-        '"group:eng-team"). `scope=org:<id>`/`scope=client:<id>` are equivalent to the orgId/clientId filters.',
+        '"client:<uuid>", "group:eng-team"). `org` and `client` are built-in namespaces; others are ' +
+        'custom scopes you define.',
     ),
   // Date window.
   createdAfter: z
@@ -172,7 +171,7 @@ const hybridSearch: ToolFactory = ({ client, log }) => ({
     'Search your tenant\'s indexed content (documents + structured records) using hybrid BM25 + dense ranking. ' +
     'Returns up to `limit` results (default 3, max 50 — raise it in one call when you can accept the larger result) ' +
     'with citations and surrounding context for grounding follow-up reasoning. ' +
-    'Narrow with contentTypes/typeName/filters, ownership (userId/orgId/clientId), folder scope, a created date window, ' +
+    'Narrow with contentTypes/typeName/filters, ownership (userId/scope), folder scope, a created date window, ' +
     'keyword precision (textMode OR/AND/PHRASE), relevance floors (minSimilarity/minTextRelevance), uniqueDocuments, ' +
     'and requireComplete (fail closed on a degraded backend). Tenant-isolated; the caller\'s scoped key fully ' +
     'constrains which content is visible. ARCHIVED (soft-retracted) documents never appear in results — fetch ' +
@@ -199,8 +198,6 @@ const hybridSearch: ToolFactory = ({ client, log }) => ({
         typeName: args.typeName as string | undefined,
         filters: args.filters as Record<string, Vectros.FilterValue> | undefined,
         userId: args.userId as string | undefined,
-        orgId: args.orgId as string | undefined,
-        clientId: args.clientId as string | undefined,
         scope: args.scope as string | undefined,
         createdAfter: args.createdAfter as string | undefined,
         createdBefore: args.createdBefore as string | undefined,

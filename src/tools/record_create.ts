@@ -47,17 +47,15 @@ const inputSchema = {
   status: z.string().optional().describe('Record lifecycle status. Defaults to ACTIVE server-side.'),
   folderId: z.string().optional().describe('Group this record into a folder.'),
   userId: z.string().optional().describe('Owning user id.'),
-  orgId: z.string().optional().describe('Owning organization id.'),
-  clientId: z.string().optional().describe('Associated client id.'),
   scopes: z
     .array(z.string())
     .optional()
     .describe(
       'Scope ownership as `namespace:value` entries, at most 2 (e.g. ["org:<uuid>", "group:eng-team"]). ' +
-        'This is the record\'s COMPLETE scope declaration and values must come from the credential\'s own ' +
-        'identity. An empty array `[]` creates a PRIVATE record owned by the calling user alone. Omit to ' +
-        'stamp the credential\'s full identity — the default. `org:`/`client:` entries are equivalent to ' +
-        'the orgId/clientId fields.',
+        '`org` and `client` are built-in namespaces; others are custom scopes you define. This is the ' +
+        'record\'s COMPLETE scope declaration and values must come from the credential\'s own identity. ' +
+        'An empty array `[]` creates a PRIVATE record owned by the calling user alone. Omit to stamp the ' +
+        'credential\'s full identity — the default.',
     ),
 };
 
@@ -83,8 +81,6 @@ const recordCreate: ToolFactory = ({ client, log }) => ({
           status: args.status as Vectros.RecordRequest.Status | undefined,
           folderId: args.folderId as string | undefined,
           userId: args.userId as string | undefined,
-          orgId: args.orgId as string | undefined,
-          clientId: args.clientId as string | undefined,
           scopes: args.scopes as string[] | undefined,
         },
       });

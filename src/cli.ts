@@ -5,7 +5,13 @@
  * stdio, runs until the client disconnects.
  *
  * Env vars (see the design doc § "Configuration"):
- *   VECTROS_API_KEY                  required; ssk_live_... or similar
+ *   VECTROS_API_KEY                  the ssk_live_... key to run with. Optional
+ *                                    ONLY when the vectros CLI is installed: if
+ *                                    unset, the key is resolved from the CLI
+ *                                    keyring (see resolve-key.ts). Set, it wins.
+ *   VECTROS_KEYRING_ALIAS            optional; resolve this keyring entry rather
+ *                                    than the active one (ignored when
+ *                                    VECTROS_API_KEY is set)
  *   VECTROS_API_BASE_URL             optional; default https://api.vectros.ai
  *   VECTROS_MCP_TOOLS                optional; comma-separated tool names
  *                                    (default: all shipped tools enabled)
@@ -31,6 +37,7 @@ import { InvalidApiKeyError } from './auth.js';
 import { parseToolsEnv } from './parse-tools-env.js';
 import { validateBaseUrl, InvalidBaseUrlError } from './base-url.js';
 import { BUILD_INFO, formatBuildInfo } from './build-info.js';
+import { resolveApiKey, noKeyMessage, keyringNotice } from './resolve-key.js';
 
 async function main(): Promise<void> {
   // `--version` is the one safe stdout write: it prints + exits BEFORE the
@@ -48,7 +55,21 @@ async function main(): Promise<void> {
   // runtime a partner runs with their key.
   const log = createLogger();
 
-  const apiKey = process.env.VECTROS_API_KEY;
+  // Resolve the key from env, else the CLI keyring helper (one credential
+  // source for the server, hooks, and scripts). Fail fast with actionable
+  // guidance if neither yields a key — never log the secret itself.
+  const resolved = await resolveApiKey();
+  const apiKey = resolved.key;
+  // Name the identity: an unset key resolves to whatever the keyring's ACTIVE
+  // entry is, and "which alias is the live key?" is exactly the question users
+  // get wrong. The alias is not a secret. Landing on an identity nobody named
+  // warns (see keyringNotice).
+  const notice = keyringNotice(resolved);
+  if (notice) log[notice.level]({ alias: notice.alias }, notice.message);
+  if (!apiKey) {
+    log.fatal({ reason: resolved.reason }, noKeyMessage(resolved));
+    process.exit(1);
+  }
   const apiBaseUrl = process.env.VECTROS_API_BASE_URL;
 
   // Validate any env-supplied base URL BEFORE the server attaches the API key
@@ -82,7 +103,7 @@ async function main(): Promise<void> {
   let server: VectrosMCPServer;
   try {
     server = new VectrosMCPServer({
-      apiKey: apiKey as string,
+      apiKey,
       tools,
       apiBaseUrl,
       logger: log,

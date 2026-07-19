@@ -65,8 +65,14 @@ const inputSchema = {
         'superseded content when the credential has no delete authority. Omit to leave unchanged.',
     ),
   userId: z.string().optional().describe('Reassign the owning user (Vectros UUID).'),
-  orgId: z.string().optional().describe('Reassign the owning org (Vectros UUID).'),
-  clientId: z.string().optional().describe('Reassign the associated client (Vectros UUID).'),
+  scopes: z
+    .array(z.string())
+    .optional()
+    .describe(
+      'Reassign scope ownership as `namespace:value` entries, at most 2 (e.g. ["org:<uuid>", ' +
+        '"group:eng-team"]) — the COMPLETE new parent set. `org`/`client` are built-in namespaces. ' +
+        'Omit to leave ownership unchanged; `[]` clears it (private to the owning user).',
+    ),
   expectedVersion: z
     .number()
     .int()
@@ -99,8 +105,7 @@ const documentUpdate: ToolFactory = ({ client, log }) => ({
     const folderId = args.folderId as string | undefined;
     const status = args.status as Vectros.DocumentRequest.Status | undefined;
     const userId = args.userId as string | undefined;
-    const orgId = args.orgId as string | undefined;
-    const clientId = args.clientId as string | undefined;
+    const scopes = args.scopes as string[] | undefined;
     const expectedVersion = args.expectedVersion as number | undefined;
     try {
       const resolved = await resolveDocumentIdByExternalId(client, { id: documentId, externalId, type });
@@ -117,8 +122,7 @@ const documentUpdate: ToolFactory = ({ client, log }) => ({
       if (folderId !== undefined) body.folderId = folderId;
       if (status !== undefined) body.status = status;
       if (userId !== undefined) body.userId = userId;
-      if (orgId !== undefined) body.orgId = orgId;
-      if (clientId !== undefined) body.clientId = clientId;
+      if (scopes !== undefined) body.scopes = scopes;
       if (expectedVersion !== undefined) body.expectedVersion = expectedVersion;
 
       const updated = await client.documents.patchDocument({

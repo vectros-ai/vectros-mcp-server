@@ -3,6 +3,49 @@
 All notable changes to `@vectros-ai/mcp-server` are documented here.
 This project adheres to [Semantic Versioning](https://semver.org).
 
+## 0.10.0
+
+### Changed (breaking)
+
+- **Organization and client identities are now namespaces.** The tools that took
+  `orgId` / `clientId` now use namespaced scopes:
+  - `lookup_principal`: `kind` is `"user"` or a namespace (`org`, `client`, or
+    one you define).
+  - Write tools (`record_create`, `folder_create`, `folder_update`,
+    `document_ingest`, `document_update`): the `orgId` / `clientId` inputs are
+    replaced by `scopes` — an array of `namespace:value` entries, e.g.
+    `["org:<id>"]`.
+  - Read and query tools (`record_query`, `document_query`, `folder_query`,
+    `hybrid_search`, `rag_ask`, `list_schemas`): the `orgId` / `clientId` filters
+    are replaced by a single `scope` filter (`namespace:value`). `list_schemas`'s
+    `surface` now accepts `record`, `document`, `user`, `entity`.
+
+### Added
+
+- **Automatic API-key resolution from the Vectros CLI keyring.** When
+  `VECTROS_API_KEY` is not set, the server now resolves its key by invoking the
+  `vectros` CLI credential helper (`vectros keyring show --format raw`) as a
+  subprocess — so a key stored once in the CLI keyring is shared by the server, agent
+  hooks, and scripts, instead of a plaintext copy pasted into the server's config
+  that silently drifts. `VECTROS_API_KEY` still takes precedence when set (behavior
+  unchanged), and an unset key now falls back to the keyring rather than failing
+  immediately. Set `VECTROS_KEYRING_ALIAS` to resolve a specific keyring entry
+  instead of the active one. Requires **`@vectros-ai/cli` 0.9.0+** on `PATH` (the
+  version the keyring itself shipped in — the helper deliberately calls no command
+  newer than that, so it works with an existing install); if neither an env key nor
+  the CLI is available, startup fails with actionable guidance naming both options.
+  The resolved key is held in memory only and never logged.
+- **Startup says which identity it resolved, and warns when you didn't name one.**
+  The startup log names the keyring entry the key came from (never the key itself).
+  When `VECTROS_API_KEY` is unset and no `VECTROS_KEYRING_ALIAS` is given, the key
+  comes from whichever entry was last made active — and that log is a **warning**,
+  whatever key turns up: silently getting a live key (acting on real data) and
+  silently getting a test key (not acting on it, when you believed you were) are both
+  unwelcome. It is easy to reach by accident, because a blank placeholder
+  (`"VECTROS_API_KEY": ""` in a client config, or a Docker `-e` pass-through of an
+  unset var) reads as "not configured yet" but resolves like an unset key. Nothing is
+  blocked, and naming an entry never warns.
+
 ## 0.9.0
 
 ### Added

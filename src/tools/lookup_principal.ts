@@ -1,9 +1,9 @@
 /**
- * lookup_principal — resolve a user / org / client identity, two modes
- * (auto-detected by args):
+ * lookup_principal — resolve a user identity or a namespaced identity entity
+ * (org / client / any namespace you registered), two modes (auto-detected by args):
  *
  *   externalId present → RESOLVE your own identifier to the Vectros UUID
- *                        (`list{Users,Orgs,Clients}({externalId})`). Returns a
+ *                        (`listUsers`/`listEntities({externalId})`). Returns a
  *                        one-element array, or empty if no match.
  *   field present      → LOOKUP on a schema-declared lookup field, one of:
  *                          • equality: `value`
@@ -11,8 +11,12 @@
  *                          • prefix:   `prefix`
  *                        (`type` — the identity schema's record type — is
  *                        required here.) Routed through the POST-body lookup
- *                        (`lookup{Users,Orgs,Clients}`), which is sensitive-safe
+ *                        (`lookupUsers`/`lookupEntities`), which is sensitive-safe
  *                        (the value never rides the URL query string).
+ *
+ * Orgs and clients are namespaces over a generic identity-entity model: `user`
+ * is the fixed principal surface; every other `kind` is an entity namespace
+ * (`org`/`client` — built in — or one you registered).
  *
  * Why this exists: the ownership filters on record_query / document_query /
  * hybrid_search / rag_ask take the Vectros-assigned UUID, but an agent usually
@@ -20,8 +24,8 @@
  * two — resolve once, then scope reads by the returned id.
  *
  * Read-only: requires the credential to allow the relevant read scope
- * (`users:r` / `orgs:r` / `clients:r`). It never creates or mutates identities —
- * identity CRUD stays off the agent tool surface by design.
+ * (`users:r` for a user; `entities:r:<namespace>` for an entity). It never creates
+ * or mutates identities — identity CRUD stays off the agent tool surface by design.
  *
  * Result limits + pagination (the enumeration-limits contract): default 10 / max 100 (the principals
  * API max — raise `limit` in one call when you can accept the payload). The result is the
@@ -39,8 +43,11 @@ const MCP_MAX_LIMIT = 100;
 
 const inputSchema = {
   kind: z
-    .enum(['user', 'org', 'client'])
-    .describe('Which principal to look up: a user, an organization, or a client.'),
+    .string()
+    .describe(
+      'Which principal to look up: "user" (the fixed principal surface), or an entity namespace — ' +
+        '"org", "client" (built in), or a namespace you registered.',
+    ),
   externalId: z
     .string()
     .optional()
@@ -87,9 +94,9 @@ const inputSchema = {
 
 const lookupPrincipal: ToolFactory = ({ client, log }) => ({
   name: 'lookup_principal',
-  title: 'Look up a user / org / client identity',
+  title: 'Look up a user identity or a namespaced identity entity',
   description:
-    'Resolve a user, org, or client identity. Two modes:\n' +
+    'Resolve a user, or an identity entity in a namespace (org/client/one you registered). Two modes:\n' +
     '  • Resolve by your own id: pass `externalId` → the matching principal incl. its Vectros UUID (the id the ' +
     'ownership filters on record_query / hybrid_search / rag_ask expect).\n' +
     '  • Lookup by a schema field: pass `type` and `field` plus exactly one of `value` (exact), `from`+`to` ' +
@@ -99,7 +106,8 @@ const lookupPrincipal: ToolFactory = ({ client, log }) => ({
     'Read-only — does not create or modify identities.',
   inputSchema,
   handler: async (args): Promise<ToolResult> => {
-    const kind = args.kind as 'user' | 'org' | 'client';
+    const kind = args.kind as string;
+    const isUser = kind === 'user';
     const limit = (args.limit as number | undefined) ?? MCP_DEFAULT_LIMIT;
     const externalId = args.externalId as string | undefined;
     const type = args.type as string | undefined;
@@ -114,16 +122,12 @@ const lookupPrincipal: ToolFactory = ({ client, log }) => ({
     try {
       let page: Page<unknown>;
       if (externalId !== undefined) {
-        // Resolve mode — externalId → UUID. One SDK call per kind (the request
-        // shapes differ per kind but all accept externalId + limit). A resolve
-        // matches at most one principal, so nextCursor is always null here.
-        if (kind === 'user') {
-          page = await client.identity.listUsers({ externalId, limit });
-        } else if (kind === 'org') {
-          page = await client.identity.listOrgs({ externalId, limit });
-        } else {
-          page = await client.identity.listClients({ externalId, limit });
-        }
+        // Resolve mode — externalId → UUID. A user hits the fixed principal surface;
+        // any other kind is an entity in the `kind` namespace. A resolve matches at
+        // most one principal, so nextCursor is always null here.
+        page = isUser
+          ? await client.identity.listUsers({ externalId, limit })
+          : await client.identity.listEntities({ namespace: kind, externalId, limit });
         log.debug({ tool: 'lookup_principal', mode: 'resolve', kind }, 'lookup_principal resolve ok');
       } else if (field !== undefined) {
         // Lookup mode — validate exactly one lookup shape, then require `type`.
@@ -153,14 +157,12 @@ const lookupPrincipal: ToolFactory = ({ client, log }) => ({
           );
         }
         // POST-body lookup: sensitive-safe (value never in the URL), all modes in one path.
+        // A user takes the lookup request directly; an entity nests it under `body`
+        // with the `kind` namespace on the envelope.
         const req = { type, field, value, from, to, prefix, order, startFrom, limit };
-        if (kind === 'user') {
-          page = await client.identity.lookupUsers(req);
-        } else if (kind === 'org') {
-          page = await client.identity.lookupOrgs(req);
-        } else {
-          page = await client.identity.lookupClients(req);
-        }
+        page = isUser
+          ? await client.identity.lookupUsers(req)
+          : await client.identity.lookupEntities({ namespace: kind, body: req });
         log.debug({ tool: 'lookup_principal', mode: 'lookup', kind, type, field }, 'lookup_principal lookup ok');
       } else {
         return toolError(

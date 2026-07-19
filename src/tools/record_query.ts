@@ -73,15 +73,13 @@ const inputSchema = {
     ),
   // List-mode args:
   userId: z.string().optional().describe('List mode: scope to records owned by this user.'),
-  orgId: z.string().optional().describe('List mode: scope to records owned by this org.'),
-  clientId: z.string().optional().describe('List mode: scope to records associated with this client.'),
   scope: z
     .string()
     .optional()
     .describe(
       'List mode: filter to records carrying this scope value, in `namespace:value` form ' +
-        '(e.g. "org:<uuid>", "group:eng-team"). `scope=org:<id>`/`scope=client:<id>` are equivalent ' +
-        'to the orgId/clientId filters.',
+        '(e.g. "org:<uuid>", "client:<uuid>", "group:eng-team"). `org` and `client` are built-in ' +
+        'namespaces; others are custom scopes you define.',
     ),
   startFrom: z
     .string()
@@ -107,7 +105,7 @@ const recordQuery: ToolFactory = ({ client, log }) => ({
     'Query structured records of a given type. Two modes:\n' +
     '  • Lookup on a lookup-indexed field: pass `field` plus exactly one of `value` (exact), ' +
     '`from`+`to` (range), or `prefix`. Works on sensitive fields too.\n' +
-    '  • List by type: omit `field`; optionally filter by `userId`/`orgId`/`clientId`.\n' +
+    '  • List by type: omit `field`; optionally filter by `userId` or `scope` (`namespace:value`).\n' +
     'Returns a `{ data, nextCursor }` page: `data` holds up to `limit` records (default 3, max 100 — ' +
     'raise it in one call when you can accept the payload), and a non-null `nextCursor` means more remain — ' +
     'pass it back as `startFrom` to page. Mode is auto-detected from the arguments present.',
@@ -167,8 +165,6 @@ const recordQuery: ToolFactory = ({ client, log }) => ({
         page = await client.records.listRecords({
           type,
           userId: args.userId as string | undefined,
-          orgId: args.orgId as string | undefined,
-          clientId: args.clientId as string | undefined,
           scope: args.scope as string | undefined,
           startFrom,
           limit,

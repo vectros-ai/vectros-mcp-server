@@ -53,12 +53,12 @@ test('every resource has the MCP-required fields', () => {
 // ============================================================================
 
 test('schemas resource calls client.schemas.listSchemas with no filter + unwraps the envelope', async () => {
-  const seenArgs: Array<{ userId?: string; orgId?: string; startFrom?: string }> = [];
+  const seenArgs: Array<{ userId?: string; scope?: string; startFrom?: string }> = [];
   const client = {
     schemas: {
       // SDK 0.23: listSchemas returns the { data, nextCursor } envelope; the
       // resource drains it (no ownership filters — always-everything).
-      listSchemas: async (args: { userId?: string; orgId?: string; startFrom?: string }) => {
+      listSchemas: async (args: { userId?: string; scope?: string; startFrom?: string }) => {
         seenArgs.push(args);
         return { data: [{ id: 'sch_1', typeName: 'patient' }], nextCursor: null };
       },
@@ -71,7 +71,7 @@ test('schemas resource calls client.schemas.listSchemas with no filter + unwraps
   const text = await r.read();
   assert.equal(seenArgs.length, 1, 'single page → one call');
   assert.equal(seenArgs[0].userId, undefined, 'no userId filter');
-  assert.equal(seenArgs[0].orgId, undefined, 'no orgId filter');
+  assert.equal(seenArgs[0].scope, undefined, 'no scope filter');
   // Body is the unwrapped bare array (lockstep with the list_schemas tool).
   const parsed = JSON.parse(text) as unknown[];
   assert.ok(Array.isArray(parsed));

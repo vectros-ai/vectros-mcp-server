@@ -24,17 +24,15 @@ const inputSchema = {
     .optional()
     .describe('Optional stable slug (sibling-unique; idempotency key). Lowercase letters/digits/hyphens. Derived from name when omitted.'),
   userId: z.string().optional().describe('Owning user (Vectros UUID).'),
-  orgId: z.string().optional().describe('Owning org (Vectros UUID).'),
-  clientId: z.string().optional().describe('Associated client (Vectros UUID).'),
   scopes: z
     .array(z.string())
     .optional()
     .describe(
       'Scope ownership as `namespace:value` entries, at most 2 (e.g. ["org:<uuid>", "group:eng-team"]). ' +
-        'This is the folder\'s COMPLETE scope declaration and values must come from the credential\'s own ' +
-        'identity. An empty array `[]` creates a PRIVATE folder owned by the calling user alone. Omit to ' +
-        'stamp the credential\'s full identity — the default. `org:`/`client:` entries are equivalent to ' +
-        'the orgId/clientId fields.',
+        '`org` and `client` are built-in namespaces; others are custom scopes you define. This is the ' +
+        'folder\'s COMPLETE scope declaration and values must come from the credential\'s own identity. ' +
+        'An empty array `[]` creates a PRIVATE folder owned by the calling user alone. Omit to stamp the ' +
+        'credential\'s full identity — the default.',
     ),
 };
 
@@ -54,8 +52,6 @@ const folderCreate: ToolFactory = ({ client, log }) => ({
           parentFolderId: args.parentId as string | undefined,
           slug: args.slug as string | undefined,
           userId: args.userId as string | undefined,
-          orgId: args.orgId as string | undefined,
-          clientId: args.clientId as string | undefined,
           scopes: args.scopes as string[] | undefined,
         },
       });

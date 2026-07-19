@@ -21,7 +21,7 @@ export interface IdentityShape {
   principalKeyId?: string;
   principalLabel?: string;
   allowedActions?: string[];
-  dataScope?: { userId?: string; orgId?: string };
+  dataScope?: { userId?: string; [scope: string]: unknown };
   tokenExpiresAt?: number;
   // Allow pass-through of any future backend-added fields without
   // requiring an MCP server release.

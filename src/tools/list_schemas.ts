@@ -33,26 +33,29 @@ const inputSchema = {
     .describe(
       'Filter to schemas visible to a specific user. Optional; default returns all schemas the credential can see.',
     ),
-  orgId: z
+  scope: z
     .string()
     .optional()
     .describe(
-      'Filter to schemas visible to a specific org. Optional; default returns all schemas the credential can see.',
+      'Filter to schemas carrying this scope value, in `namespace:value` form (e.g. "org:<uuid>", ' +
+        '"group:eng-team"). `org` and `client` are built-in namespaces. Optional; default returns all ' +
+        'schemas the credential can see.',
     ),
   surface: z
-    .enum(['record', 'document', 'user', 'org', 'client'])
+    .enum(['record', 'document', 'user', 'entity'])
     .optional()
     .describe(
       'Filter to schemas bindable to this surface — e.g. `document` to list only document types, or `record` ' +
-        'for record types. The identity surfaces (user/org/client) are account-wide. Optional.',
+        'for record types. Identity entities in any namespace (org/client/one you registered) bind under the ' +
+        'single `entity` surface; `user` and `entity` are account-wide. Optional.',
     ),
   recordType: z
     .string()
     .optional()
     .describe(
       'Resolve the single schema for this record type (its natural handle, e.g. "patient") instead of listing — ' +
-        'returns a one-element result, or empty if none. Combine with `surface=user|org|client` for an identity ' +
-        'schema. Takes precedence over userId/orgId. Optional.',
+        'returns a one-element result, or empty if none. Combine with `surface=user|entity` for an identity ' +
+        'schema. Takes precedence over userId. Optional.',
     ),
 };
 
@@ -63,21 +66,21 @@ const listSchemas: ToolFactory = ({ client, log }) => ({
     'List the structured-record schema catalog for your tenant. ' +
     'Each schema describes a record type (e.g. "patient", "clinical_note") — its fields, lookup-indexed fields, and capabilities. ' +
     'Use this to discover what record types exist before calling `record_query`. ' +
-    'Filter with `surface` (record/document/user/org/client — e.g. only document types), `recordType` (resolve ' +
-    'one schema by its type name), or `userId`/`orgId`; default returns everything the credential can see.',
+    'Filter with `surface` (record/document/user/entity — e.g. only document types), `recordType` (resolve ' +
+    'one schema by its type name), or `userId`/`scope`; default returns everything the credential can see.',
   inputSchema,
   handler: async (args): Promise<ToolResult> => {
     const userId = args.userId as string | undefined;
-    const orgId = args.orgId as string | undefined;
-    const surface = args.surface as 'record' | 'document' | 'user' | 'org' | 'client' | undefined;
+    const scope = args.scope as string | undefined;
+    const surface = args.surface as 'record' | 'document' | 'user' | 'entity' | undefined;
     const recordType = args.recordType as string | undefined;
     try {
       // Drain the paged envelope into the full catalog (flat array).
       const schemas = await drainPages<Vectros.SchemaResponse>((startFrom) =>
-        client.schemas.listSchemas({ userId, orgId, surface, recordType, startFrom }),
+        client.schemas.listSchemas({ userId, scope, surface, recordType, startFrom }),
       );
       log.debug(
-        { tool: 'list_schemas', userId, orgId, surface, recordType, returned: schemas.length },
+        { tool: 'list_schemas', userId, scope, surface, recordType, returned: schemas.length },
         'list_schemas ok',
       );
       return {

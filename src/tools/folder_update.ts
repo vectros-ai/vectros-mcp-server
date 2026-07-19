@@ -28,8 +28,14 @@ const inputSchema = {
   name: z.string().optional().describe('New folder name. Omit to keep the current name.'),
   description: z.string().optional().describe('New description. Omit to leave unchanged.'),
   userId: z.string().optional().describe('Reassign the owning user (Vectros UUID).'),
-  orgId: z.string().optional().describe('Reassign the owning org (Vectros UUID).'),
-  clientId: z.string().optional().describe('Reassign the associated client (Vectros UUID).'),
+  scopes: z
+    .array(z.string())
+    .optional()
+    .describe(
+      'Reassign scope ownership as `namespace:value` entries, at most 2 (e.g. ["org:<uuid>", ' +
+        '"group:eng-team"]) — the COMPLETE new parent set. `org`/`client` are built-in namespaces. ' +
+        'Omit to leave ownership unchanged; `[]` clears it (private to the owning user).',
+    ),
   expectedVersion: z
     .number()
     .int()
@@ -53,8 +59,7 @@ const folderUpdate: ToolFactory = ({ client, log }) => ({
     const name = args.name as string | undefined;
     const description = args.description as string | undefined;
     const userId = args.userId as string | undefined;
-    const orgId = args.orgId as string | undefined;
-    const clientId = args.clientId as string | undefined;
+    const scopes = args.scopes as string[] | undefined;
     const expectedVersion = args.expectedVersion as number | undefined;
     try {
       // RFC-7386 merge-patch: send only what's changing — no read-to-carry-name
@@ -65,8 +70,7 @@ const folderUpdate: ToolFactory = ({ client, log }) => ({
       if (name !== undefined) body.name = name;
       if (description !== undefined) body.description = description;
       if (userId !== undefined) body.userId = userId;
-      if (orgId !== undefined) body.orgId = orgId;
-      if (clientId !== undefined) body.clientId = clientId;
+      if (scopes !== undefined) body.scopes = scopes;
       if (expectedVersion !== undefined) body.expectedVersion = expectedVersion;
 
       const updated = await client.folders.patchFolder({ id, body: body as Vectros.FolderRequest });

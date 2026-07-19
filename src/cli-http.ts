@@ -5,7 +5,8 @@
  *
  * Run as: `vectros-mcp-server-http` or `npx -y @vectros-ai/mcp-server vectros-mcp-server-http`.
  *
- * Env vars (additions to the stdio set — see cli.ts for the rest):
+ * Env vars (additions to the stdio set — see cli.ts for the rest, including
+ * VECTROS_API_KEY / VECTROS_KEYRING_ALIAS key resolution, which is identical here):
  *   VECTROS_MCP_HTTP_PORT             optional; default 8765
  *   VECTROS_MCP_HTTP_HOST             optional; default 127.0.0.1
  *                                     (localhost-only; pass 0.0.0.0
@@ -43,11 +44,20 @@ import type { ToolName } from './tools/index.js';
 import { InvalidApiKeyError } from './auth.js';
 import { parseToolsEnv } from './parse-tools-env.js';
 import { validateBaseUrl, InvalidBaseUrlError } from './base-url.js';
+import { resolveApiKey, noKeyMessage, keyringNotice } from './resolve-key.js';
 
 async function main(): Promise<void> {
   const log = createLogger();
 
-  const apiKey = process.env.VECTROS_API_KEY;
+  // One credential source (env, else the CLI keyring helper) — see cli.ts.
+  const resolved = await resolveApiKey();
+  const apiKey = resolved.key;
+  const notice = keyringNotice(resolved);
+  if (notice) log[notice.level]({ alias: notice.alias }, notice.message);
+  if (!apiKey) {
+    log.fatal({ reason: resolved.reason }, noKeyMessage(resolved));
+    process.exit(1);
+  }
   const apiBaseUrl = process.env.VECTROS_API_BASE_URL;
 
   // Validate any env-supplied base URL BEFORE the server attaches the API key
@@ -109,7 +119,7 @@ async function main(): Promise<void> {
   let server: VectrosMCPServer;
   try {
     server = new VectrosMCPServer({
-      apiKey: apiKey as string,
+      apiKey,
       tools,
       apiBaseUrl,
       logger: log,

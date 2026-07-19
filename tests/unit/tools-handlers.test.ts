@@ -120,8 +120,7 @@ test('hybrid_search passes through the full launch enrichment surface', async ()
       typeName: 'patient',
       filters: { status: 'open', price: { $gte: 100 } },
       userId: 'u1',
-      orgId: 'o1',
-      clientId: 'c1',
+      scope: 'org:o1',
       createdAfter: '2026-01-01T00:00:00Z',
       createdBefore: '2026-12-31T00:00:00Z',
       minSimilarity: 0.42,
@@ -135,8 +134,7 @@ test('hybrid_search passes through the full launch enrichment surface', async ()
   assert.equal(a.typeName, 'patient');
   assert.deepEqual(a.filters, { status: 'open', price: { $gte: 100 } });
   assert.equal(a.userId, 'u1');
-  assert.equal(a.orgId, 'o1');
-  assert.equal(a.clientId, 'c1');
+  assert.equal(a.scope, 'org:o1');
   assert.equal(a.createdAfter, '2026-01-01T00:00:00Z');
   assert.equal(a.createdBefore, '2026-12-31T00:00:00Z');
   assert.equal(a.minSimilarity, 0.42);
@@ -675,8 +673,7 @@ test('rag_ask passes retrieval scoping + instructions + temperature through to t
         mode: 'SEMANTIC',
         limit: 7,
         userId: 'u1',
-        orgId: 'o1',
-        clientId: 'c1',
+        scope: 'org:o1',
         folderId: 'f1',
         rootFolderId: 'rf1',
         typeName: 'patient',
@@ -697,8 +694,7 @@ test('rag_ask passes retrieval scoping + instructions + temperature through to t
   assert.equal(search.mode, 'SEMANTIC');
   assert.equal(search.limit, 7);
   assert.equal(search.userId, 'u1');
-  assert.equal(search.orgId, 'o1');
-  assert.equal(search.clientId, 'c1');
+  assert.equal(search.scope, 'org:o1');
   assert.equal(search.folderId, 'f1');
   assert.equal(search.rootFolderId, 'rf1');
   assert.equal(search.typeName, 'patient');
@@ -815,7 +811,7 @@ test('list_schemas calls client.schemas.listSchemas + unwraps the {data} envelop
   assert.equal(s.calls.length, 1, 'single page → one call (nextCursor null)');
   const a = s.calls[0].args as Record<string, unknown>;
   assert.equal(a.userId, undefined);
-  assert.equal(a.orgId, undefined);
+  assert.equal(a.scope, undefined);
   // Agent-facing output is the UNWRAPPED bare array, not the {data,nextCursor}
   // envelope — preserving the v0.1/v0.2 contract across the SDK 0.23 change.
   const body = parsedText(r) as unknown[];
@@ -851,7 +847,7 @@ test('list_schemas drains every page across nextCursor', async () => {
   assert.equal(body.length, 3, 'all pages flattened into one array');
 });
 
-test('list_schemas passes through userId + orgId filters', async () => {
+test('list_schemas passes through userId + scope filters', async () => {
   const s = spy();
   const client = {
     schemas: {
@@ -862,10 +858,10 @@ test('list_schemas passes through userId + orgId filters', async () => {
     },
   } as never;
   const tool = listSchemas({ client, log });
-  await tool.handler({ userId: 'usr_42', orgId: 'org_clin' }, {});
+  await tool.handler({ userId: 'usr_42', scope: 'org:org_clin' }, {});
   const a = s.calls[0].args as Record<string, unknown>;
   assert.equal(a.userId, 'usr_42');
-  assert.equal(a.orgId, 'org_clin');
+  assert.equal(a.scope, 'org:org_clin');
 });
 
 test('list_schemas returns isError when SDK throws', async () => {
@@ -1104,7 +1100,7 @@ test('current_identity merges extended ping response over derived fields', async
     principalKeyId: 'ssk_live_xyz_stable',
     principalLabel: 'Claude Desktop — RO',
     allowedActions: ['search:read', 'records:read'],
-    dataScope: { orgId: 'org_clin' },
+    dataScope: { 'scope:org': 'org_clin' },
   });
   const f = stubFetch({ status: 200, body: extendedResponse });
   try {
@@ -1122,7 +1118,7 @@ test('current_identity merges extended ping response over derived fields', async
     assert.equal(body.principalKeyId, 'ssk_live_xyz_stable');
     assert.equal(body.principalLabel, 'Claude Desktop — RO');
     assert.deepEqual(body.allowedActions, ['search:read', 'records:read']);
-    assert.deepEqual(body.dataScope, { orgId: 'org_clin' });
+    assert.deepEqual(body.dataScope, { 'scope:org': 'org_clin' });
     // Status is always 'ok' on 2xx.
     assert.equal(body.status, 'ok');
   } finally {
@@ -1262,7 +1258,7 @@ test('document_ingest text mode passes through indexMode + ownership + payload/s
       schemaId: 'sch_1',
       externalId: 'ext-1',
       userId: 'usr_1',
-      orgId: 'org_1',
+      scopes: ['org:org_1'],
     },
     {},
   );
@@ -1274,7 +1270,7 @@ test('document_ingest text mode passes through indexMode + ownership + payload/s
   assert.equal(a.schemaId, 'sch_1');
   assert.equal(a.externalId, 'ext-1');
   assert.equal(a.userId, 'usr_1');
-  assert.equal(a.orgId, 'org_1');
+  assert.deepEqual(a.scopes, ['org:org_1']);
   // The dead `metadata` field is gone — nothing named `metadata` reaches the SDK.
   assert.equal(a.metadata, undefined, 'no stale metadata key on the wire');
 });
@@ -1624,7 +1620,7 @@ test('document_update forwards title/folderId/ownership; omits payload when no f
   } as never;
   const tool = documentUpdate({ client, log });
   const r = await tool.handler(
-    { documentId: 'doc1', title: 'New Title', folderId: 'fld_new', storeText: true, userId: 'u9', orgId: 'o9', clientId: 'c9' },
+    { documentId: 'doc1', title: 'New Title', folderId: 'fld_new', storeText: true, userId: 'u9', scopes: ['org:o9', 'client:c9'] },
     {},
   );
   assert.ok(!r.isError);
@@ -1634,8 +1630,7 @@ test('document_update forwards title/folderId/ownership; omits payload when no f
   assert.equal(upd.body.storeText, undefined,
     'storeText is immutable (fixed at ingest) — never forwarded on update, even if supplied');
   assert.equal(upd.body.userId, 'u9', 'ownership reassignment forwarded');
-  assert.equal(upd.body.orgId, 'o9');
-  assert.equal(upd.body.clientId, 'c9');
+  assert.deepEqual(upd.body.scopes, ['org:o9', 'client:c9']);
   assert.equal(upd.body.payload, undefined, 'no fields → payload omitted (preserved, not wiped)');
 });
 
@@ -1877,7 +1872,7 @@ test('folder_create passes name/description + maps parentId→parentFolderId', a
   } as never;
   const tool = folderCreate({ client, log });
   const r = await tool.handler(
-    { name: 'Reports', description: 'Q4', parentId: 'root', slug: 'reports', userId: 'u1', orgId: 'o1', clientId: 'c1' },
+    { name: 'Reports', description: 'Q4', parentId: 'root', slug: 'reports', userId: 'u1', scopes: ['org:o1', 'client:c1'] },
     {},
   );
   assert.ok(!r.isError);
@@ -1888,8 +1883,7 @@ test('folder_create passes name/description + maps parentId→parentFolderId', a
   assert.equal(a.parentFolderId, 'root');
   assert.equal(a.slug, 'reports', 'slug forwarded');
   assert.equal(a.userId, 'u1', 'ownership forwarded');
-  assert.equal(a.orgId, 'o1');
-  assert.equal(a.clientId, 'c1');
+  assert.deepEqual(a.scopes, ['org:o1', 'client:c1']);
   const body = parsedText(r) as { id: string };
   assert.equal(body.id, 'fld_new');
 });
@@ -1947,15 +1941,14 @@ test('folder_update forwards expectedVersion + ownership for optimistic concurre
   } as never;
   const tool = folderUpdate({ client, log });
   const r = await tool.handler(
-    { id: 'fld1', name: 'Renamed', userId: 'u1', orgId: 'o1', clientId: 'c1', expectedVersion: 7 },
+    { id: 'fld1', name: 'Renamed', userId: 'u1', scopes: ['org:o1', 'client:c1'], expectedVersion: 7 },
     {},
   );
   assert.ok(!r.isError);
   const upd = s.calls[0].args as { id: string; body: Record<string, unknown> };
   assert.equal(upd.body.name, 'Renamed');
   assert.equal(upd.body.userId, 'u1');
-  assert.equal(upd.body.orgId, 'o1');
-  assert.equal(upd.body.clientId, 'c1');
+  assert.deepEqual(upd.body.scopes, ['org:o1', 'client:c1']);
   assert.equal(upd.body.expectedVersion, 7, 'expectedVersion forwarded for the 409 conflict path');
 });
 
@@ -2212,13 +2205,12 @@ test('document_get flags downloadAvailable:false for a text-only document (404/4
 
 // ── lookup_principal ─────────────────────────────────────────────────────────
 
-test('lookup_principal resolve mode: externalId → list{Kind} for user/org/client', async () => {
+test('lookup_principal resolve mode: externalId → listUsers (user) / listEntities(namespace) (org/client)', async () => {
   const s = spy();
   const client = {
     identity: {
       listUsers: async (a: unknown) => { s.record('listUsers', a); return { data: [{ id: 'u-uuid' }] }; },
-      listOrgs: async (a: unknown) => { s.record('listOrgs', a); return { data: [{ id: 'o-uuid' }] }; },
-      listClients: async (a: unknown) => { s.record('listClients', a); return { data: [{ id: 'c-uuid' }] }; },
+      listEntities: async (a: unknown) => { s.record('listEntities', a); return { data: [{ id: 'e-uuid' }] }; },
     },
   } as never;
   const tool = lookupPrincipal({ client, log });
@@ -2233,10 +2225,13 @@ test('lookup_principal resolve mode: externalId → list{Kind} for user/org/clie
     'resolve returns a { data, nextCursor } page (one match, so the cursor is null)',
   );
 
+  // org/client are namespaces over the generic entity surface.
   await tool.handler({ kind: 'org', externalId: 'org_1' }, {});
-  assert.equal(s.calls[1].method, 'listOrgs');
+  assert.equal(s.calls[1].method, 'listEntities');
+  assert.equal((s.calls[1].args as Record<string, unknown>).namespace, 'org');
   await tool.handler({ kind: 'client', externalId: 'cli_1' }, {});
-  assert.equal(s.calls[2].method, 'listClients');
+  assert.equal(s.calls[2].method, 'listEntities');
+  assert.equal((s.calls[2].args as Record<string, unknown>).namespace, 'client');
 });
 
 test('lookup_principal lookup mode: type+field+value → lookup{Kind} (POST body, sensitive-safe)', async () => {
@@ -2276,16 +2271,18 @@ test('lookup_principal validates lookup args (missing mode, conflicting modes, m
   assert.match(r4.content[0].text, /externalId.*or.*type.*field/s);
 });
 
-test('lookup_principal forwards range/prefix/order to the lookup POST body', async () => {
+test('lookup_principal forwards range/prefix/order to the entity lookup POST body', async () => {
   const s = spy();
   const client = {
-    identity: { lookupClients: async (a: unknown) => { s.record('lookupClients', a); return { data: [] }; } },
+    identity: { lookupEntities: async (a: unknown) => { s.record('lookupEntities', a); return { data: [] }; } },
   } as never;
   const tool = lookupPrincipal({ client, log });
   await tool.handler({ kind: 'client', type: 'client_v1', field: 'tier', prefix: 'gold', order: 'desc' }, {});
-  const a = s.calls[0].args as Record<string, unknown>;
-  assert.equal(a.prefix, 'gold');
-  assert.equal(a.order, 'desc');
+  // An entity lookup nests the criteria under `body` with the namespace on the envelope.
+  const a = s.calls[0].args as { namespace: string; body: Record<string, unknown> };
+  assert.equal(a.namespace, 'client');
+  assert.equal(a.body.prefix, 'gold');
+  assert.equal(a.body.order, 'desc');
 });
 
 test('lookup_principal paginates: forwards startFrom + raised limit, surfaces nextCursor', async () => {

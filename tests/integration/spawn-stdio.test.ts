@@ -147,11 +147,21 @@ test('tools/call dispatch fails closed: unknown tool + invalid args (no SDK call
   }
 });
 
-test('CLI fails fast on missing VECTROS_API_KEY', async () => {
+test('CLI fails fast when no key resolves (no env key, no keyring match)', async () => {
+  // An unset VECTROS_API_KEY no longer means "fail" — it means "fall back to the
+  // CLI keyring helper". So pin an alias that cannot resolve, which is
+  // deterministic on ANY machine: with the CLI installed the helper exits 2 (no
+  // such entry), without it the helper reports the CLI absent. Both leave the
+  // server with no key. Without this pin the test would depend on whether the
+  // machine running it happens to have a readable active keyring entry.
   const transport = new StdioClientTransport({
     command: 'node',
     args: [CLI_PATH],
-    env: { ...process.env, VECTROS_API_KEY: '' },
+    env: {
+      ...process.env,
+      VECTROS_API_KEY: '',
+      VECTROS_KEYRING_ALIAS: 'no-such-alias-integration-test',
+    },
   });
   const client = new Client({ name: 'integration-test', version: '0.0.1' }, { capabilities: {} });
   await assert.rejects(client.connect(transport), /process exited|spawn|connection|closed/i);

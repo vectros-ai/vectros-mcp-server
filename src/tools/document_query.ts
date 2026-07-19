@@ -7,8 +7,8 @@
  *                     • prefix:   `prefix`        (range-enabled string fields)
  *                   `type` (the document's bound schema type) is required here.
  *   no field      → LIST by folder / owner. `listDocuments` filters by folderId +
- *                     userId/orgId/clientId only (documents are typed via their
- *                     bound schema, so there is no `type` list filter).
+ *                     userId/scope only (documents are typed via their bound
+ *                     schema, so there is no `type` list filter).
  *
  * Lookups route through `lookupDocumentsByBody` (POST), NOT the GET variant: the
  * POST body supports equality/range/prefix uniformly, is REQUIRED for SENSITIVE
@@ -73,15 +73,13 @@ const inputSchema = {
   // List-mode args:
   folderId: z.string().optional().describe('List mode: only documents in this folder (Vectros folder id).'),
   userId: z.string().optional().describe('List mode: scope to documents owned by this user.'),
-  orgId: z.string().optional().describe('List mode: scope to documents belonging to this org.'),
-  clientId: z.string().optional().describe('List mode: scope to documents associated with this client.'),
   scope: z
     .string()
     .optional()
     .describe(
       'List mode: filter to documents carrying this scope value, in `namespace:value` form ' +
-        '(e.g. "org:<uuid>", "group:eng-team"). `scope=org:<id>`/`scope=client:<id>` are equivalent ' +
-        'to the orgId/clientId filters.',
+        '(e.g. "org:<uuid>", "client:<uuid>", "group:eng-team"). `org` and `client` are built-in ' +
+        'namespaces; others are custom scopes you define.',
     ),
   startFrom: z
     .string()
@@ -108,7 +106,7 @@ const documentQuery: ToolFactory = ({ client, log }) => ({
     '  • Lookup on a lookup-indexed field: pass `type` and `field` plus exactly one of ' +
     '`value` (exact), `from`+`to` (range), or `prefix`. Works on sensitive fields ' +
     '(equality only there); range/prefix need a range-enabled field.\n' +
-    '  • List: omit `field`; optionally filter by `folderId`/`userId`/`orgId`/`clientId`/`scope`.\n' +
+    '  • List: omit `field`; optionally filter by `folderId`/`userId`/`scope` (`namespace:value`).\n' +
     'Returns a `{ data, nextCursor }` page: `data` holds up to `limit` documents (default 3, max 100 — ' +
     'raise it in one call when you can accept the payload), and a non-null `nextCursor` means more remain — ' +
     'pass it back as `startFrom` to page. Mode is auto-detected. ' +
@@ -175,8 +173,6 @@ const documentQuery: ToolFactory = ({ client, log }) => ({
         page = await client.documents.listDocuments({
           folderId: args.folderId as string | undefined,
           userId: args.userId as string | undefined,
-          orgId: args.orgId as string | undefined,
-          clientId: args.clientId as string | undefined,
           scope: args.scope as string | undefined,
           startFrom,
           limit,

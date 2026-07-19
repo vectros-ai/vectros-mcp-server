@@ -33,8 +33,14 @@ const inputSchema = {
     .optional()
     .describe('List mode: direct children of this folder (tree navigation). Omit for a flat tenant list.'),
   userId: z.string().optional().describe('List mode: scope to folders owned by this user.'),
-  orgId: z.string().optional().describe('List mode: scope to folders belonging to this org.'),
-  clientId: z.string().optional().describe('List mode: scope to folders associated with this client.'),
+  scope: z
+    .string()
+    .optional()
+    .describe(
+      'List mode: filter to folders carrying this scope value, in `namespace:value` form ' +
+        '(e.g. "org:<uuid>", "client:<uuid>", "group:eng-team"). `org` and `client` are built-in ' +
+        'namespaces; others are custom scopes you define.',
+    ),
   startFrom: z
     .string()
     .optional()
@@ -58,7 +64,7 @@ const folderQuery: ToolFactory = ({ client, log }) => ({
     'Read folders. Two modes:\n' +
     '  • Get: pass `id` → returns the single folder.\n' +
     '  • List: omit `id`; pass `parentId` for a folder\'s direct children (tree navigation) or omit for a ' +
-    'flat tenant list. Optionally filter by `userId`/`orgId`/`clientId`.\n' +
+    'flat tenant list. Optionally filter by `userId` or `scope` (`namespace:value`).\n' +
     'List mode returns `{ data, nextCursor }` (default 10, max 100 per page — raise it in one call when you ' +
     'can accept the larger page); a non-null `nextCursor` means more remain — pass it back as `startFrom` to ' +
     'page through all folders. Get mode returns the single folder object.',
@@ -75,8 +81,7 @@ const folderQuery: ToolFactory = ({ client, log }) => ({
       const page = await client.folders.listFolders({
         parentFolderId: args.parentId as string | undefined,
         userId: args.userId as string | undefined,
-        orgId: args.orgId as string | undefined,
-        clientId: args.clientId as string | undefined,
+        scope: args.scope as string | undefined,
         startFrom: args.startFrom as string | undefined,
         limit,
       });

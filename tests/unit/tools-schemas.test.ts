@@ -175,13 +175,13 @@ test('list_schemas accepts userId filter', () => {
   assert.ok(r.success);
 });
 
-test('list_schemas accepts orgId filter', () => {
-  const r = validate('list_schemas', { orgId: 'org_1' });
+test('list_schemas accepts scope filter', () => {
+  const r = validate('list_schemas', { scope: 'org:org_1' });
   assert.ok(r.success);
 });
 
-test('list_schemas accepts both userId + orgId', () => {
-  const r = validate('list_schemas', { userId: 'usr_1', orgId: 'org_1' });
+test('list_schemas accepts both userId + scope', () => {
+  const r = validate('list_schemas', { userId: 'usr_1', scope: 'org:org_1' });
   assert.ok(r.success);
 });
 
@@ -228,7 +228,7 @@ test('document_ingest accepts text mode with full options (typed: payload + sche
     schemaId: 'sch_1',
     externalId: 'ext-1',
     userId: 'usr_1',
-    orgId: 'org_1',
+    scopes: ['org:org_1'],
   });
   assert.ok(r.success);
 });
@@ -420,8 +420,9 @@ test('lookup_principal accepts limit up to the API max (100) + a startFrom curso
   assert.ok(validate('lookup_principal', { kind: 'user', type: 't', field: 'f', value: 'v', startFrom: 'cur_1' }).success);
 });
 
-test('lookup_principal rejects a bad kind / bad order / limit > 100', () => {
-  assert.ok(!validate('lookup_principal', { kind: 'tenant', externalId: 'x' }).success);
+test('lookup_principal rejects a bad order / limit > 100 (kind is a free namespace string)', () => {
+  // kind generalized from a closed enum to 'user' or any namespace, so 'team' validates.
+  assert.ok(validate('lookup_principal', { kind: 'team', externalId: 'x' }).success);
   assert.ok(!validate('lookup_principal', { kind: 'user', type: 't', field: 'f', value: 'v', order: 'down' }).success);
   assert.ok(!validate('lookup_principal', { kind: 'user', externalId: 'x', limit: 101 }).success);
 });
