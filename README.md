@@ -213,7 +213,7 @@ available.
 
 | Tool | What it does |
 |---|---|
-| `current_identity` | Describe the credential: tenantId, environment, principalType, and (where surfaced) allowedActions + dataScope. |
+| `current_identity` | Describe the credential: tenantId, environment, principalType, principalKeyId, and (for scoped credentials) allowedActions + dataScope. |
 | `lookup_principal` | Resolve a user / org / client by your own `externalId` (→ its Vectros UUID, for the ownership filters) or by a schema lookup field. Read-only. |
 | `version_history` | Read the audit/version trail (CREATE/UPDATE/DELETE, with actor + diff) for one record or document. Read-only. |
 

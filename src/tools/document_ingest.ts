@@ -162,7 +162,9 @@ const inputSchema = {
     .describe(
       'Stable caller-supplied id. Immutable; unique per type within your context. Re-ingesting with the same ' +
         'externalId returns the existing document (idempotent) instead of creating a duplicate — use it to make ' +
-        'ingests safely retryable and as the key other records reference. Mirrors record_create.',
+        'ingests safely retryable and as the key other records reference. Mirrors record_create. Receiving the ' +
+        'existing document back is a read of it and needs documents:r in addition to documents:c; a create-only ' +
+        'key gets an "already exists" error instead of the document.',
     ),
   upsert: z
     .boolean()
@@ -190,7 +192,9 @@ const inputSchema = {
     .describe(
       'The document\'s structured data — a flat key/value object. With `schemaId`, declared fields are validated ' +
         'and lookup fields indexed; undeclared keys pass through as free-form and are searchable via the ' +
-        'hybrid_search `filters` param. Without a schema it is stored as free-form metadata.',
+        'hybrid_search `filters` param. Without a schema it is stored as free-form metadata. Every number must ' +
+        'fall within the signed 64-bit range — send a larger whole number as a STRING (stored exactly, ' +
+        'exact-match lookup), else the ingest is refused with a 400 naming the field.',
     ),
 
   // Inline text mode (mutually exclusive with filePath):
@@ -203,12 +207,13 @@ const inputSchema = {
     .boolean()
     .optional()
     .describe(
-      'Whether the document\'s text is retained after indexing (default true). Applies to BOTH modes ' +
-        'and is fixed at ingest time. Text mode: the ingested body is always retained (this flag is ' +
-        'effectively always true — the body is the document). File mode: true keeps the extracted text ' +
-        'retrievable via document_get(includeText:true) and usable by document_ask; false discards the ' +
-        'extracted text once indexing completes — search still works and the original file remains ' +
-        'downloadable, but includeText returns textAvailable:false and document_ask is unavailable.',
+      'FILE MODE ONLY. Whether the uploaded file\'s EXTRACTED text is retained after indexing (default ' +
+        'true), fixed at ingest. true keeps the extracted text retrievable via document_get(includeText:true) ' +
+        'and usable by document_ask; false discards it once indexing completes — search still works and the ' +
+        'original file remains downloadable, but includeText returns textAvailable:false and document_ask is ' +
+        'unavailable. NOT accepted with `text`: a text-ingested body is the document itself and is ALWAYS ' +
+        'retained, so the backend has no storeText knob on the text path — passing it with `text` is rejected ' +
+        'rather than silently ignored.',
     ),
 
   // File upload mode (mutually exclusive with text; stdio-transport-only):
@@ -258,14 +263,15 @@ const documentIngest: ToolFactory = ({ client, log, transport, ingestRoot }) => 
     'rejected on HTTP transport. MCP server reads the bytes, requests a presigned upload URL, and PUTs them. ' +
     'Returns when the upload is accepted (indexStatus: PENDING_INDEX); poll with `document_get` until indexStatus is INDEXED.\n' +
     'Either `text` or `filePath` must be present; both is an error. ' +
-    'Idempotent by `externalId` (re-ingest returns the existing document, not a duplicate). To UPDATE an ' +
+    'Idempotent by `externalId` (re-ingest returns the existing document, not a duplicate — requires ' +
+    'documents:r in addition to documents:c, since being handed the existing document is a read of it). To UPDATE an ' +
     'existing document instead — re-index an edited body — pass `upsert:true` with the same `externalId` ' +
     '(and the same `schemaId`); this is the re-sync primitive for keeping a knowledge base current. Pass ' +
     '`schemaId` + `payload` for a typed, lookup-queryable document (records parity). ' +
     'indexMode defaults to HYBRID for untyped documents (omit to inherit a bound schema\'s default). ' +
-    'storeText defaults to true and is fixed at ingest: in file mode, false discards the extracted text ' +
+    'storeText is a FILE-MODE knob (default true): false discards the uploaded file\'s extracted text ' +
     'after indexing (search + file download keep working; text retrieval and document_ask do not). ' +
-    'Text-mode bodies are always retained.',
+    'Text-mode bodies are always retained, so storeText is not accepted with `text`.',
   inputSchema,
   handler: async (args): Promise<ToolResult> => {
     const title = args.title as string;
@@ -317,6 +323,24 @@ const documentIngest: ToolFactory = ({ client, log, transport, ingestRoot }) => 
           '`scopes` is not supported with `filePath` — file uploads do not accept a scope declaration, and ' +
             'silently ignoring it could make an intended-private document team-visible. Use `text` mode to ' +
             'declare scopes, or omit `scopes` (the upload is stamped with the credential\'s full identity).',
+        ),
+      );
+    }
+
+    // storeText gate — the flag is a FILE-mode retention knob for the uploaded
+    // file's EXTRACTED text. The inline-text path has no storeText field at all
+    // (a text body is ALWAYS retained), so forwarding it there does nothing.
+    // Rejecting a passed value on the text path makes the surface honest instead
+    // of accepting-and-silently-ignoring it — a caller who passes storeText:false
+    // on a text doc expecting a discard the text contract can never honor would
+    // otherwise be silently misled.
+    if (text && args.storeText !== undefined) {
+      return toolError(
+        'document_ingest',
+        new Error(
+          '`storeText` is not supported with `text` — a text-ingested body is the document itself and is ' +
+            'always retained; the text path has no storeText control. Omit it (text mode), or use `filePath` ' +
+            'mode where storeText:false discards the uploaded file\'s extracted text after indexing.',
         ),
       );
     }

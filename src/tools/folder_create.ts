@@ -6,7 +6,10 @@
  * when omitted. `parentId` places the folder under a parent (create-only — a
  * folder cannot be moved later via the API).
  *
- * Requires the credential to allow `folders:c`.
+ * Requires the credential to allow `folders:c` to create. Being returned an
+ * existing folder on a collision additionally requires `folders:r` — a
+ * `folders:c`-only key gets a clean "already exists" error instead of the
+ * folder.
  */
 import { z } from 'zod';
 import type { ToolFactory, ToolResult } from './types.js';
@@ -41,7 +44,8 @@ const folderCreate: ToolFactory = ({ client, log }) => ({
   title: 'Create a folder',
   description:
     'Create a folder to organize documents and records. Pass `parentId` to nest it (create-only — folders ' +
-    'cannot be moved later). Idempotent by `slug` within the parent. Requires the key to allow folders:c.',
+    'cannot be moved later). Idempotent by `slug` within the parent. Requires the key to allow folders:c ' +
+    '(and folders:r to receive the existing folder on a collision).',
   inputSchema,
   handler: async (args): Promise<ToolResult> => {
     try {

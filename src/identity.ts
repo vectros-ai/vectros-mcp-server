@@ -16,12 +16,16 @@ export interface IdentityShape {
   status: 'ok';
   environment?: 'staging' | 'production';
   principalType?: 'root_key' | 'scoped_key' | 'token';
-  // Extended fields (present once backend ships extended /v1/ping):
+  // Extended fields — the /v1/ping response carries these in full today
+  // (they are absent only on the derived-only no-fetch path below):
   tenantId?: string;
   principalKeyId?: string;
   principalLabel?: string;
   allowedActions?: string[];
-  dataScope?: { userId?: string; [scope: string]: unknown };
+  // The credential's reach: an owning userId plus per-namespace `namespace:value`
+  // scope strings (e.g. "org:<uuid>"). No orgId/clientId keys — org and client
+  // are ordinary reserved namespaces.
+  dataScope?: { userId?: string; scopes?: string[] };
   tokenExpiresAt?: number;
   // Allow pass-through of any future backend-added fields without
   // requiring an MCP server release.

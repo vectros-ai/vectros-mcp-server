@@ -11,14 +11,15 @@
  * exploration → current_identity + § "Backend deliverables surfaced
  * by MCP v0.2"):
  *
- * Target response shape: status, tenantId, environment,
- * principalType, principalKeyId, principalLabel?, allowedActions?,
- * dataScope?, tokenExpiresAt?.
+ * Response shape (the extended /v1/ping ships this in full today):
+ * status, tenantId, environment, principalType, principalKeyId,
+ * principalLabel?, allowedActions?, dataScope? ({ userId, scopes[] }),
+ * tokenExpiresAt?.
  *
- * Until backend ships the extended /v1/ping response, returns a
- * minimal derived shape (status + environment + principalType).
- * Fields appear automatically as backend rolls out — no MCP server
- * version bump required.
+ * The resolver still merges over a client-side derived shape (status +
+ * environment + principalType) so the no-fetch path — a test mock or a
+ * programmatic embedder that omits apiKey/environment — degrades cleanly
+ * rather than throwing; see resolveIdentity's contract.
  */
 import type { ToolFactory, ToolResult } from './types.js';
 import { toolError } from './errors.js';
@@ -33,11 +34,10 @@ const currentIdentity: ToolFactory = ({ log, apiKey, environment }) => ({
   title: 'Current identity (tenant + principal scope)',
   description:
     "Describe the credential the MCP server is operating under. Returns tenantId, environment " +
-    "(staging|production), principalType (root_key|scoped_key|token), principalKeyId, and (for scoped " +
-    "keys) allowedActions + dataScope. Use this when the user asks 'what can you do here?' or 'what " +
-    "tenant am I in?'. Calls GET /v1/ping under the hood. " +
-    "Backend may still be rolling out the extended /v1/ping response shape — until then this tool " +
-    "returns a minimal shape; richer fields appear automatically as backend ships.",
+    "(staging|production), principalType (root_key|scoped_key|token), principalKeyId, principalLabel, " +
+    "and (for scoped credentials) allowedActions plus dataScope — the credential's reach as { userId, " +
+    "scopes[] }, where each scope is a `namespace:value` string (e.g. \"org:<uuid>\"). Use this when the " +
+    "user asks 'what can you do here?' or 'what tenant am I in?'. Calls GET /v1/ping under the hood.",
   inputSchema,
   handler: async (): Promise<ToolResult> => {
     try {

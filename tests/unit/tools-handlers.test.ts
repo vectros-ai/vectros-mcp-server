@@ -1090,8 +1090,8 @@ test('current_identity derives environment + principalType from ctx (degraded mo
 });
 
 test('current_identity merges extended ping response over derived fields', async () => {
-  // Simulate the future state where backend has shipped the extended
-  // /v1/ping response — extended fields appear automatically.
+  // The extended /v1/ping response (shipped today) — its fields merge over the
+  // client-side derived shape. dataScope is the { userId, scopes[] } shape.
   const extendedResponse = JSON.stringify({
     status: 'ok',
     tenantId: 'tenant_acme',
@@ -1099,8 +1099,8 @@ test('current_identity merges extended ping response over derived fields', async
     principalType: 'scoped_key',
     principalKeyId: 'ssk_live_xyz_stable',
     principalLabel: 'Claude Desktop — RO',
-    allowedActions: ['search:read', 'records:read'],
-    dataScope: { 'scope:org': 'org_clin' },
+    allowedActions: ['search:r', 'records:r'],
+    dataScope: { userId: 'usr_alice', scopes: ['org:org_clin'] },
   });
   const f = stubFetch({ status: 200, body: extendedResponse });
   try {
@@ -1117,8 +1117,8 @@ test('current_identity merges extended ping response over derived fields', async
     assert.equal(body.tenantId, 'tenant_acme');
     assert.equal(body.principalKeyId, 'ssk_live_xyz_stable');
     assert.equal(body.principalLabel, 'Claude Desktop — RO');
-    assert.deepEqual(body.allowedActions, ['search:read', 'records:read']);
-    assert.deepEqual(body.dataScope, { 'scope:org': 'org_clin' });
+    assert.deepEqual(body.allowedActions, ['search:r', 'records:r']);
+    assert.deepEqual(body.dataScope, { userId: 'usr_alice', scopes: ['org:org_clin'] });
     // Status is always 'ok' on 2xx.
     assert.equal(body.status, 'ok');
   } finally {
@@ -1236,7 +1236,7 @@ test('document_ingest text mode calls ingestDocument with correct args + default
   assert.equal(a.storeText, undefined, 'storeText is not part of the text-ingest contract — never forwarded');
 });
 
-test('document_ingest text mode passes through indexMode + ownership + payload/schemaId/externalId, and never forwards storeText', async () => {
+test('document_ingest text mode passes through indexMode + ownership + payload/schemaId/externalId', async () => {
   const s = spy();
   const client = {
     documents: {
@@ -1252,7 +1252,6 @@ test('document_ingest text mode passes through indexMode + ownership + payload/s
       title: 'X',
       text: 'body',
       indexMode: 'SEMANTIC',
-      storeText: false,
       folderId: 'fld_1',
       payload: { source: 'crawl' },
       schemaId: 'sch_1',
@@ -1264,7 +1263,7 @@ test('document_ingest text mode passes through indexMode + ownership + payload/s
   );
   const a = (s.calls[0].args as { body: Record<string, unknown> }).body;
   assert.equal(a.indexMode, 'SEMANTIC');
-  assert.equal(a.storeText, undefined, 'text mode drops storeText even when supplied — the body is always retained');
+  assert.equal(a.storeText, undefined, 'storeText is never on the text-ingest wire (no storeText field on that contract)');
   assert.equal(a.folderId, 'fld_1');
   assert.deepEqual(a.payload, { source: 'crawl' });
   assert.equal(a.schemaId, 'sch_1');
@@ -1273,6 +1272,30 @@ test('document_ingest text mode passes through indexMode + ownership + payload/s
   assert.deepEqual(a.scopes, ['org:org_1']);
   // The dead `metadata` field is gone — nothing named `metadata` reaches the SDK.
   assert.equal(a.metadata, undefined, 'no stale metadata key on the wire');
+});
+
+// storeText is a FILE-mode retention knob; the text-ingest path has no such field
+// (a text body is always retained). Passing it with `text` must be REJECTED, not
+// accepted-and-silently-ignored — silently dropping it misleads a caller who passes
+// storeText:false expecting a discard the text contract can never honor.
+test('document_ingest text mode REJECTS storeText instead of silently ignoring it', async () => {
+  const s = spy();
+  const client = {
+    documents: {
+      ingestDocument: async (args: unknown) => {
+        s.record('ingestDocument', args);
+        return { id: 'doc_new' };
+      },
+    },
+  } as never;
+  const tool = documentIngest({ client, log });
+  for (const storeText of [false, true]) {
+    const r = await tool.handler({ title: 'X', text: 'body', storeText }, {});
+    assert.equal(r.isError, true, `storeText:${storeText} with text must be an error`);
+    assert.match(r.content[0].text, /storeText.*not supported with.*text/i);
+  }
+  // The SDK was never called — the request is refused before any ingest.
+  assert.equal(s.calls.length, 0, 'no ingestDocument call on a rejected request');
 });
 
 test('document_ingest text mode passes upsert as the top-level request flag (re-sync primitive)', async () => {

@@ -9,8 +9,10 @@
  * Idempotent by `externalId`: re-creating with the same externalId returns the
  * existing record rather than duplicating.
  *
- * Requires the credential to allow `records:c` — a read-only key gets a clean
- * permission error (the tool never tears down the session).
+ * Requires the credential to allow `records:c` to create. Being returned an
+ * existing record on a collision additionally requires `records:r` for that
+ * type — a `records:c`-only key gets a clean "already exists" error instead
+ * of the record (the tool never tears down the session).
  */
 import { z } from 'zod';
 import type { Vectros } from '@vectros-ai/sdk';
@@ -26,7 +28,10 @@ const inputSchema = {
     .record(z.string(), z.unknown())
     .describe(
       'The record payload — a JSON object of field→value, validated against the type schema. ' +
-        'Call list_schemas to learn required fields, types, and enum values.',
+        'Call list_schemas to learn required fields, types, and enum values. Every number must fall within ' +
+        'the signed 64-bit range (a value outside it, or with >38 significant digits, is refused with a 400 ' +
+        'naming the field) — send a larger whole number (e.g. a big external id) as a STRING, which stores ' +
+        'it exactly and supports exact-match lookup.',
     ),
   externalId: z
     .string()
@@ -65,7 +70,8 @@ const recordCreate: ToolFactory = ({ client, log }) => ({
   description:
     'Create a structured record of a given type. Provide `type` and `fields` (the payload, validated ' +
     'against the type schema — call list_schemas first to learn required fields and enums). Idempotent ' +
-    'by `externalId`. Requires the key to allow records:c.',
+    'by `externalId`. Requires the key to allow records:c (and records:r to receive the existing record ' +
+    'on a collision).',
   inputSchema,
   handler: async (args): Promise<ToolResult> => {
     const type = args.type as string;

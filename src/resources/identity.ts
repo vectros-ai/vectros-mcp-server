@@ -18,9 +18,9 @@ const identityResource: ResourceFactory = ({ log, apiKey, environment }) => ({
   title: 'Current identity (tenant + principal scope)',
   description:
     'The tenant + principal scope the MCP server is authenticated as. Returns the same payload as the ' +
-    '`current_identity` tool: status, environment, principalType, principalKeyId, and (for scoped keys) ' +
-    'allowedActions + dataScope. Until backend ships the extended /v1/ping response, returns a minimal ' +
-    'derived shape; richer fields appear automatically as backend rolls out.',
+    '`current_identity` tool: status, tenantId, environment, principalType, principalKeyId, principalLabel, ' +
+    'and (for scoped credentials) allowedActions + dataScope ({ userId, scopes[] }). The /v1/ping backing ' +
+    'call ships this extended shape today.',
   mimeType: 'application/json',
   read: async (): Promise<string> => {
     const identity = await resolveIdentity({ log, apiKey, environment });

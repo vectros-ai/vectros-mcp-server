@@ -3,6 +3,62 @@
 All notable changes to `@vectros-ai/mcp-server` are documented here.
 This project adheres to [Semantic Versioning](https://semver.org).
 
+## 0.11.0
+
+Refreshed to the 0.36.0 Vectros API, with clearer, more actionable errors and a
+few tool-surface corrections.
+
+### Changed
+
+- **Tool errors now carry the server's real reason, a typed code, and a request
+  id.** When a tool call fails, the result surfaces the API's own message, the
+  machine-readable `errorCode` (so an agent can branch on the cause — e.g.
+  `INSUFFICIENT_BALANCE` "top up your balance" versus `SUBSCRIPTION_LIMIT_EXCEEDED`
+  "upgrade your plan" on a payment-required failure, or a placement/authorization
+  denial), and the `requestId` to quote to support — instead of a bare HTTP status
+  and a generic class name.
+- **`document_ingest` rejects `storeText` in text mode instead of ignoring it.**
+  `storeText` only applies to file uploads (it controls whether a file's extracted
+  text is retained). A text-ingested body is the document itself and is always
+  retained, so passing `storeText` alongside `text` is now refused with a clear
+  message rather than silently having no effect.
+
+### Added
+
+- **Errors surface the 0.36.0 typed error codes.** Payment-required failures on
+  `rag_ask` / `document_ask` now distinguish an exhausted pre-paid balance from a
+  reached plan limit; a number outside the signed 64-bit range is reported as a
+  `400` naming the field.
+- **Guidance for search-indexing failures.** `document_get` and `record_get`
+  descriptions explain the `indexFailure.code` that accompanies a `FAILED`
+  `indexStatus`, so an agent can tell content that is still partly findable
+  (e.g. `VECTOR_LIMIT_EXCEEDED`, keyword search still serves it) from content that
+  is not findable at all (`INDEXING_FAILED`).
+- **Large-number guidance.** `record_create` and `document_ingest` note that every
+  number must fall within the signed 64-bit range and that larger whole numbers
+  (e.g. big external ids) should be sent as strings, which store exactly and support
+  exact-match lookup.
+
+### Fixed
+
+- **`current_identity` / the `identity` resource describe the identity shape they
+  actually return.** The obsolete "the backend is still rolling this out" caveat is
+  gone; the extended shape (`principalType`, `principalKeyId`, `allowedActions`, and
+  a `dataScope` of `{ userId, scopes[] }`) is returned today.
+- **`hybrid_search` gives accurate keyword-leg guidance.** When the keyword leg
+  matches nothing (`textLegEmpty`), the description now explains that the default
+  phrase match found no contiguous hit for a long query and points to shortening the
+  query or setting `textMode` to `AND` (precision) or `OR` (recall), rather than
+  prescribing a single fix.
+- **`record_create` and `folder_create` describe the scope needed to receive an
+  existing item on a collision, not just to create one.** Both tools are
+  idempotent by key (`externalId` for records, `slug` for folders); the
+  description previously said only `records:c`/`folders:c` was required, but
+  being handed back the existing item on a collision is a read of that item
+  and separately requires `records:r`/`folders:r`. A key holding only the
+  create scope now gets an accurate description of the "already exists"
+  error it will see instead of the record.
+
 ## 0.10.0
 
 ### Changed (breaking)

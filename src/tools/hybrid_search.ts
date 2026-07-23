@@ -179,8 +179,9 @@ const hybridSearch: ToolFactory = ({ client, log }) => ({
     'chunkText + a short snippet by default; set includeContext:true for the broader surrounding passage. If the ' +
     'whole result would be too large it is truncated to the top hits (truncated:true). totalResults is the full ' +
     'matching pool and hasMore:true means results remain past this page — raise limit or advance offset to fetch them. ' +
-    'textLegEmpty:true flags that ' +
-    'the keyword leg matched nothing (all textScores 0) — usually a too-long PHRASE query; retry with textMode:"OR".',
+    'textLegEmpty:true flags that the keyword (BM25) leg matched nothing (all textScores 0) — typically the default ' +
+    'PHRASE mode finding no contiguous match for a long natural-language query. Loosen the keyword leg: shorten the ' +
+    'query to its key terms, or set textMode "AND" (all terms, higher precision) or "OR" (any term, broad recall).',
   inputSchema,
   handler: async (args): Promise<ToolResult> => {
     const limit = (args.limit as number | undefined) ?? MCP_DEFAULT_LIMIT;

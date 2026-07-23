@@ -43,7 +43,10 @@ const recordGet: ToolFactory = ({ client, log }) => ({
     'Fetch a single structured record, including the full payload. Select it EITHER by its Vectros `id` ' +
     '(e.g. from record_query / hybrid_search) OR by your own `externalId` + `type` — the same key you passed ' +
     'to record_create, resolved for you (no manual record_query lookup needed). ' +
-    'Very large payloads are truncated to protect the agent context window.',
+    'Very large payloads are truncated to protect the agent context window. The response carries the ' +
+    'record\'s processing `indexStatus`; when it is FAILED an `indexFailure.code` explains whether the ' +
+    'content is still searchable (e.g. VECTOR_LIMIT_EXCEEDED keeps keyword search vs INDEXING_FAILED = not ' +
+    'findable at all) — branch on the `code`, not the message.',
   inputSchema,
   handler: async (args): Promise<ToolResult> => {
     const id = args.id as string | undefined;

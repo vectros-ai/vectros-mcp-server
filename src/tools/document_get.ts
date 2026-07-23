@@ -93,7 +93,10 @@ const documentGet: ToolFactory = ({ client, log }) => ({
     'retrievable via `includeDownloadUrl`. Pass `includeDownloadUrl: true` to also ' +
     'get a short-lived presigned `downloadUrl` for the original file (file-backed documents only). ' +
     'Returns the full document metadata, including its lifecycle `status` (ACTIVE, or ARCHIVED when ' +
-    'soft-retracted from search — restorable via document_update) and its processing `indexStatus`.',
+    'soft-retracted from search — restorable via document_update) and its processing `indexStatus`. When ' +
+    '`indexStatus` is FAILED the response also carries `indexFailure` with a machine-readable `code` telling ' +
+    'you whether the content is still findable — e.g. TEXT_INDEX_FAILED / VECTOR_LIMIT_EXCEEDED (one leg ' +
+    'still serves it) vs INDEXING_FAILED (not findable by search at all). Branch on `code`, not on the message.',
   inputSchema,
   handler: async (args): Promise<ToolResult> => {
     const documentId = args.documentId as string | undefined;
