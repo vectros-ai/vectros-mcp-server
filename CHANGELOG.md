@@ -3,6 +3,35 @@
 All notable changes to `@vectros-ai/mcp-server` are documented here.
 This project adheres to [Semantic Versioning](https://semver.org).
 
+## 0.12.0
+
+### Fixed
+
+- **`document_get`/`document_update` selector errors now name the right parameter.**
+  Calling either tool with a bad or missing selector previously told you to
+  "provide `id`" — but their actual parameter is `documentId`; `id` isn't
+  recognized at all. A caller reasonably assuming symmetry with `record_get`
+  (which genuinely does use `id`) got an error message that appeared to confirm
+  the wrong fix. Both selector-validation messages now say `documentId`;
+  `record_get`/`record_update` are unchanged (their parameter really is `id`).
+
+### Changed
+
+- **`hybrid_search` results now carry `externalId` per hit, and the response
+  includes `hasMore`.** `externalId` lets you correlate a hit back to your own
+  record/document identity without a follow-up lookup (null if the item was
+  ingested without one, or indexed before this field existed). `hasMore` tells
+  you explicitly whether more results are available past the current page.
+- **The `textLegEmpty` diagnostic no longer fires on every non-empty TEXT-mode
+  search.** It's based on each hit's keyword-relevance score, which the API
+  previously reported as `0` for every TEXT-mode result regardless of actual
+  relevance; TEXT-mode now returns a real, meaningful score, so the diagnostic
+  only fires when the keyword leg genuinely contributed nothing.
+- **Dependency maintenance** — repinned the bundled `@vectros-ai/sdk` to `0.37.0`
+  (additive `basedOn` schema customization, `specificityRank` on namespaces, and
+  the search/RAG response fields above). The server bundles the SDK into its
+  published output, so this is a rebuild against the current SDK.
+
 ## 0.11.0
 
 Refreshed to the 0.36.0 Vectros API, with clearer, more actionable errors and a

@@ -19,15 +19,22 @@ export interface Selector {
 
 export type Resolved = { id: string } | { error: string };
 
-/** Validate that exactly one selector shape was supplied (id XOR externalId+type). */
-function validateSelector(sel: Selector, entity: string): string | undefined {
+/**
+ * Validate that exactly one selector shape was supplied (id XOR externalId+type).
+ * `fieldName` is the CALLER's public parameter name for the id selector (e.g.
+ * `documentId` for the document tools, `id` for the record tools) — the two
+ * messages below must name what the caller actually passed, not this
+ * function's internal `Selector.id` field, or the error tells the caller to
+ * "fix" a parameter that was never wrong (#784).
+ */
+function validateSelector(sel: Selector, entity: string, fieldName: string): string | undefined {
   const hasId = sel.id !== undefined && sel.id !== '';
   const hasExt = sel.externalId !== undefined && sel.externalId !== '';
   if (hasId && hasExt) {
-    return `Provide either id or externalId (not both) to identify the ${entity}.`;
+    return `Provide either ${fieldName} or externalId (not both) to identify the ${entity}.`;
   }
   if (!hasId && !hasExt) {
-    return `Provide id, or externalId + type, to identify the ${entity}.`;
+    return `Provide ${fieldName}, or externalId + type, to identify the ${entity}.`;
   }
   if (hasExt && (sel.type === undefined || sel.type === '')) {
     return 'type is required when selecting by externalId (externalId is unique within a type).';
@@ -39,7 +46,7 @@ export async function resolveRecordIdByExternalId(
   client: VectrosClient,
   sel: Selector,
 ): Promise<Resolved> {
-  const err = validateSelector(sel, 'record');
+  const err = validateSelector(sel, 'record', 'id');
   if (err) return { error: err };
   if (sel.id) return { id: sel.id };
   const page = await client.records.lookupRecordsByBody({
@@ -59,7 +66,7 @@ export async function resolveDocumentIdByExternalId(
   client: VectrosClient,
   sel: Selector,
 ): Promise<Resolved> {
-  const err = validateSelector(sel, 'document');
+  const err = validateSelector(sel, 'document', 'documentId');
   if (err) return { error: err };
   if (sel.id) return { id: sel.id };
   const page = await client.documents.lookupDocumentsByBody({

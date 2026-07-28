@@ -1021,6 +1021,32 @@ test('document_get surfaces getDocument errors as tool error', async () => {
   assert.match(r.content[0].text, /404/);
 });
 
+// #784: the selector-validation error must name the document tools' own public
+// param (`documentId`), not the resolver's internal `id` field — a caller who
+// reasonably assumes symmetry with record_get (which genuinely uses `id`)
+// must not be told to "fix" a parameter document_get never accepted.
+test('document_get errors (no SDK call) when neither documentId nor externalId is given', async () => {
+  const s = spy();
+  const client = {
+    documents: {
+      getDocument: async (a: unknown) => (s.record('getDocument', a), {}),
+    },
+  } as never;
+  const tool = documentGet({ client, log });
+  const r = await tool.handler({}, {});
+  assert.equal(r.isError, true);
+  assert.match(r.content[0].text, /Provide documentId, or externalId \+ type/);
+  assert.equal(s.calls.length, 0, 'no SDK call when the selector is missing');
+});
+
+test('document_get errors when both documentId and externalId are given', async () => {
+  const client = { documents: {} } as never;
+  const tool = documentGet({ client, log });
+  const r = await tool.handler({ documentId: 'doc_1', externalId: 'ext-1', type: 'note' }, {});
+  assert.equal(r.isError, true);
+  assert.match(r.content[0].text, /Provide either documentId or externalId \(not both\)/);
+});
+
 // ============================================================================
 // current_identity
 //
@@ -1783,6 +1809,23 @@ test('document_update returns isError when SDK throws', async () => {
   const tool = documentUpdate({ client, log });
   const r = await tool.handler({ documentId: 'nope', fields: {} }, {});
   assert.equal(r.isError, true);
+});
+
+// #784: same fix as document_get — document_update remaps its own `documentId`
+// into the resolver's internal `id` field at its own call site, an independent
+// place the defect could regress even though document_get's call site is fixed.
+test('document_update errors (no SDK call) when neither documentId nor externalId is given', async () => {
+  const s = spy();
+  const client = {
+    documents: {
+      patchDocument: async (a: unknown) => (s.record('patchDocument', a), {}),
+    },
+  } as never;
+  const tool = documentUpdate({ client, log });
+  const r = await tool.handler({ fields: { note: 'x' } }, {});
+  assert.equal(r.isError, true);
+  assert.match(r.content[0].text, /Provide documentId, or externalId \+ type/);
+  assert.equal(s.calls.length, 0, 'no SDK call when the selector is missing');
 });
 
 // ============================================================================
