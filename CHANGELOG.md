@@ -3,6 +3,43 @@
 All notable changes to `@vectros-ai/mcp-server` are documented here.
 This project adheres to [Semantic Versioning](https://semver.org).
 
+## 0.13.0
+
+### Added
+
+- **`record_query` can now look up a record by several fields at once — for a
+  type whose schema declares a lookup over those fields together** (not any
+  two fields you pick; see the type's schema, e.g. via `list_schemas`). Pass
+  the comma-joined field names (e.g. `"status,area"`) with one value per field
+  in the new `values` array — or a single `value`, which is exactly a
+  one-element `values` (matches the first named field, grouping by the rest).
+  Supplying fewer values than the lookup declares — as long as they're a
+  leading run of its fields — returns records grouped by the fields left
+  unspecified; `from`/`to`/`prefix` are not valid on a composite field
+  (exact-match only). Also new: `sortFrom`/`sortTo` narrow an exact-match
+  (`value` or a full `values`) lookup to a window of the field's sort key
+  instead of paging the whole match. Record lookups only; document lookups
+  are unchanged.
+- **`current_identity` (and the `identity` resource) now report `mcpServerVersion` and
+  `sdkVersion`**, so you can tell exactly which server build and bundled SDK version a
+  running instance is talking with.
+
+### Fixed
+
+- **`list_schemas` (and the `schemas` resource) no longer risk hanging on an unusual
+  empty-page response.** Draining the schema catalog now stops with a clear error
+  instead of paging forever if the backend ever returns an empty page alongside a
+  cursor that keeps claiming more remain.
+
+### Changed
+
+- **Dependency maintenance** — repinned the bundled `@vectros-ai/sdk` to `0.38.0`.
+  This pulls in a **Vectros API-side** pagination fix (distinct from the client-side
+  guard above): a listing or lookup could previously report itself complete while
+  results remained on a large page read; the API itself now always pages correctly,
+  and every tool here that pages already trusted the cursor rather than the page
+  size, so this is inherited automatically.
+
 ## 0.12.0
 
 ### Fixed

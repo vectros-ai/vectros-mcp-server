@@ -184,7 +184,7 @@ available.
 | Tool | What it does |
 |---|---|
 | `list_schemas` | List the record-schema catalog the credential can see (filter by `surface` or resolve one by `recordType`). Makes `record_query` / `record_create` discoverable. |
-| `record_query` | Query records by lookup field (equality / range / prefix, with `asc`/`desc` ordering) or list mode (filter by ownership + type). |
+| `record_query` | Query records by lookup field — equality (`value`), range, or prefix, with `asc`/`desc` ordering and an optional `sortFrom`/`sortTo` window — or list mode (filter by ownership + type). Also supports composite equality across 2-3 fields (`values`), but only against a lookup the *schema* declares over those fields together (see `list_schemas`) — not any two fields you pick. |
 | `record_get` | Fetch one record by id, including its full payload (large payloads truncated to protect the agent context window). |
 | `record_create` | Create a record of a given type; idempotent by `externalId`; optional per-record `indexMode`. |
 | `record_update` | Patch a record's payload (deep-merged; `null` deletes a key); optimistic concurrency via `expectedVersion`. |
@@ -213,7 +213,7 @@ available.
 
 | Tool | What it does |
 |---|---|
-| `current_identity` | Describe the credential: tenantId, environment, principalType, principalKeyId, and (for scoped credentials) allowedActions + dataScope. |
+| `current_identity` | Describe the credential: tenantId, environment, principalType, principalKeyId, and (for scoped credentials) allowedActions + dataScope. Also reports this server's own version and the bundled SDK version (`mcpServerVersion`, `sdkVersion`). |
 | `lookup_principal` | Resolve a user / org / client by your own `externalId` (→ its Vectros UUID, for the ownership filters) or by a schema lookup field. Read-only. |
 | `version_history` | Read the audit/version trail (CREATE/UPDATE/DELETE, with actor + diff) for one record or document. Read-only. |
 

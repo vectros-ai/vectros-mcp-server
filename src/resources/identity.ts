@@ -19,8 +19,9 @@ const identityResource: ResourceFactory = ({ log, apiKey, environment }) => ({
   description:
     'The tenant + principal scope the MCP server is authenticated as. Returns the same payload as the ' +
     '`current_identity` tool: status, tenantId, environment, principalType, principalKeyId, principalLabel, ' +
-    'and (for scoped credentials) allowedActions + dataScope ({ userId, scopes[] }). The /v1/ping backing ' +
-    'call ships this extended shape today.',
+    '(for scoped credentials) allowedActions + dataScope ({ userId, scopes[] }), plus mcpServerVersion and ' +
+    'sdkVersion (this build\'s own version and the bundled @vectros-ai/sdk version). The /v1/ping backing ' +
+    'call ships the extended shape today; the version fields are always client-derived.',
   mimeType: 'application/json',
   read: async (): Promise<string> => {
     const identity = await resolveIdentity({ log, apiKey, environment });

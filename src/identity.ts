@@ -11,6 +11,7 @@
  * src/tools/current_identity.ts header for the full reasoning.
  */
 import type { Logger } from './log.js';
+import { BUILD_INFO } from './build-info.js';
 
 export interface IdentityShape {
   status: 'ok';
@@ -27,6 +28,12 @@ export interface IdentityShape {
   // are ordinary reserved namespaces.
   dataScope?: { userId?: string; scopes?: string[] };
   tokenExpiresAt?: number;
+  // Client-side provenance — this build's own version + the bundled SDK version
+  // (see build-info.ts). Always client-derived, never fetched: the server has no
+  // way to know what a given MCP server binary shipped with, so these are stamped
+  // in below rather than merged from /v1/ping's `extended` response.
+  mcpServerVersion?: string;
+  sdkVersion?: string;
   // Allow pass-through of any future backend-added fields without
   // requiring an MCP server release.
   [key: string]: unknown;
@@ -78,6 +85,8 @@ export async function resolveIdentity({
     status: 'ok',
     environment: deriveEnvironment(environment),
     principalType: derivePrincipalType(apiKey),
+    mcpServerVersion: BUILD_INFO.mcpServer,
+    sdkVersion: BUILD_INFO.sdk,
   };
 
   if (!apiKey || !environment) {
@@ -115,8 +124,17 @@ export async function resolveIdentity({
   }
 
   // Merge derived + extended. Extended fields override derived
-  // (backend is authoritative once it ships them).
-  const merged: IdentityShape = { ...derived, ...extended, status: 'ok' };
+  // (backend is authoritative once it ships them) — except status, mcpServerVersion
+  // and sdkVersion, which are always client-derived: the backend has no way to know
+  // what a given MCP server binary shipped with, so those three are re-asserted
+  // after the spread rather than left open to an (unexpected) same-named field.
+  const merged: IdentityShape = {
+    ...derived,
+    ...extended,
+    status: 'ok',
+    mcpServerVersion: derived.mcpServerVersion,
+    sdkVersion: derived.sdkVersion,
+  };
 
   log.debug(
     {

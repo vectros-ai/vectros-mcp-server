@@ -106,6 +106,9 @@ test('identity resource returns derived-only when apiKey/env absent', async () =
   assert.equal(parsed.status, 'ok');
   assert.equal(parsed.environment, undefined);
   assert.equal(parsed.principalType, undefined);
+  // Same shared resolveIdentity() as the current_identity tool.
+  assert.equal(parsed.mcpServerVersion, 'dev');
+  assert.equal(parsed.sdkVersion, 'dev');
 });
 
 test('identity resource delegates to shared helper (uses fetch /v1/ping)', async () => {

@@ -125,6 +125,25 @@ test('record_query rejects limit > 100 (the API max)', () => {
   assert.ok(!r.success);
 });
 
+test('record_query accepts a composite lookup (values array) and sortFrom/sortTo', () => {
+  const r = validate('record_query', {
+    type: 'ticket',
+    field: 'status,area',
+    values: ['open', 'billing'],
+    sortFrom: '1700000000000',
+    sortTo: '1800000000000',
+  });
+  assert.ok(r.success);
+});
+
+test('record_query rejects an empty or oversized values array', () => {
+  assert.ok(!validate('record_query', { type: 'ticket', field: 'status,area', values: [] }).success);
+  assert.ok(
+    !validate('record_query', { type: 'ticket', field: 'a,b,c', values: ['1', '2', '3', '4'] }).success,
+    'a composite lookup names at most 3 fields',
+  );
+});
+
 test('rag_ask accepts minimal args', () => {
   const r = validate('rag_ask', { query: 'What treatments has the patient tried?' });
   assert.ok(r.success);

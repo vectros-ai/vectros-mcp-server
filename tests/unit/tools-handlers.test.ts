@@ -399,6 +399,193 @@ test('record_query lookup supports range + prefix, and rejects bad mode combos',
   assert.equal(s.calls.length, before, 'invalid combos make no SDK call');
 });
 
+test('record_query lookup supports a composite (values) match, alone and combined with sortFrom/sortTo', async () => {
+  const s = spy();
+  const client = {
+    records: {
+      lookupRecordsByBody: async (args: unknown) => {
+        s.record('lookupRecordsByBody', args);
+        return { data: [{ id: 'r1' }], nextCursor: null };
+      },
+    },
+  } as never;
+  const tool = recordQuery({ client, log });
+
+  await tool.handler({ type: 'ticket', field: 'status,area', values: ['open', 'billing'] }, {});
+  let a = s.calls.at(-1)!.args as Record<string, unknown>;
+  assert.equal(a.field, 'status,area');
+  assert.deepEqual(a.values, ['open', 'billing']);
+  assert.equal(a.value, undefined, "'values' mode does not also send 'value'");
+
+  // A leading-run partial tuple (grouped-result mode) is a valid composite call too —
+  // the tool does not require the caller to supply every field.
+  await tool.handler({ type: 'ticket', field: 'status,area', values: ['open'] }, {});
+  a = s.calls.at(-1)!.args as Record<string, unknown>;
+  assert.deepEqual(a.values, ['open']);
+
+  // sortFrom/sortTo narrow a composite match too.
+  await tool.handler(
+    { type: 'ticket', field: 'status,area', values: ['open', 'billing'], sortFrom: '100', sortTo: '200' },
+    {},
+  );
+  a = s.calls.at(-1)!.args as Record<string, unknown>;
+  assert.equal(a.sortFrom, '100');
+  assert.equal(a.sortTo, '200');
+});
+
+test('record_query rejects value+values together, and sortFrom/sortTo outside equality/composite mode', async () => {
+  const s = spy();
+  const client = {
+    records: {
+      lookupRecordsByBody: async (args: unknown) => {
+        s.record('lookupRecordsByBody', args);
+        return { data: [], nextCursor: null };
+      },
+    },
+  } as never;
+  const tool = recordQuery({ client, log });
+
+  const both = await tool.handler(
+    { type: 'ticket', field: 'status,area', value: 'open', values: ['open', 'billing'] },
+    {},
+  );
+  assert.equal(both.isError, true);
+  assert.match(both.content[0].text, /mutually exclusive/i);
+
+  const sortWithRange = await tool.handler(
+    { type: 'task', field: 'dueDate', from: '2026-01-01', to: '2026-12-31', sortFrom: '100' },
+    {},
+  );
+  assert.equal(sortWithRange.isError, true);
+  assert.match(sortWithRange.content[0].text, /sortFrom.*sortTo|value.*values/i);
+
+  const sortWithPrefix = await tool.handler(
+    { type: 'patient', field: 'name', prefix: 'Sm', sortTo: '200' },
+    {},
+  );
+  assert.equal(sortWithPrefix.isError, true);
+
+  assert.equal(s.calls.length, 0, 'no invalid combo reaches the SDK');
+});
+
+test('record_query catches composite arity/consistency mistakes locally, before the SDK call', async () => {
+  const s = spy();
+  const client = {
+    records: {
+      lookupRecordsByBody: async (args: unknown) => {
+        s.record('lookupRecordsByBody', args);
+        return { data: [], nextCursor: null };
+      },
+    },
+  } as never;
+  const tool = recordQuery({ client, log });
+
+  // A comma-bearing `field` naming several fields WITH a singular `value` IS a valid
+  // equality lookup — the server resolves a scalar `value` to a one-element `values`
+  // tuple (a leading-run partial/grouped match), the same as `values: ['open']` below.
+  // (Was previously rejected here — that was wrong: it blocked a shape the API answers
+  // correctly while forwarding the genuinely invalid range/prefix-on-composite shapes
+  // untouched. See the composite-with-range/prefix cases right below.)
+  const commaFieldWithValue = await tool.handler(
+    { type: 'ticket', field: 'status,area', value: 'open' },
+    {},
+  );
+  assert.equal(commaFieldWithValue.isError, undefined, 'comma-field + value is a valid partial composite match');
+  const lastCall = s.calls.at(-1)!.args as Record<string, unknown>;
+  assert.equal(lastCall.field, 'status,area');
+  assert.equal(lastCall.value, 'open');
+
+  // A composite field is exact-match only — range/prefix over several fields at once
+  // has no meaning on the backend, and must be caught locally instead of forwarded.
+  const compositeWithRange = await tool.handler(
+    { type: 'ticket', field: 'status,area', from: 'a', to: 'z' },
+    {},
+  );
+  assert.equal(compositeWithRange.isError, true);
+  assert.match(compositeWithRange.content[0].text, /exact-match only/i);
+
+  const compositeWithPrefix = await tool.handler(
+    { type: 'ticket', field: 'status,area', prefix: 'op' },
+    {},
+  );
+  assert.equal(compositeWithPrefix.isError, true);
+  assert.match(compositeWithPrefix.content[0].text, /exact-match only/i);
+
+  // More values than 'field' names fields — not a valid leading-run prefix of anything.
+  const tooManyValues = await tool.handler(
+    { type: 'ticket', field: 'status,area', values: ['open', 'billing', 'extra'] },
+    {},
+  );
+  assert.equal(tooManyValues.isError, true);
+  assert.match(tooManyValues.content[0].text, /entries but 'field' names only/i);
+
+  // sortFrom/sortTo require the FULL tuple — a partial (grouped) composite match has
+  // no single continuous ordering to window, per the API's own documented contract.
+  const partialWithSort = await tool.handler(
+    { type: 'ticket', field: 'status,area', values: ['open'], sortFrom: '100' },
+    {},
+  );
+  assert.equal(partialWithSort.isError, true);
+  assert.match(partialWithSort.content[0].text, /requires a value for every field/i);
+
+  // The full tuple + sortFrom/sortTo IS valid — confirms the guard above rejects on
+  // arity, not on the mere presence of sortFrom/sortTo with 'values'.
+  await tool.handler({ type: 'ticket', field: 'status,area', values: ['open', 'billing'], sortFrom: '100' }, {});
+
+  assert.equal(
+    s.calls.length,
+    2,
+    'the comma-field+value call and the full-tuple+sortFrom call reach the SDK; the three rejections do not',
+  );
+});
+
+test('record_query normalizes `field` (trims + re-joins) before forwarding, even when validation already passed', async () => {
+  const s = spy();
+  const client = {
+    records: {
+      lookupRecordsByBody: async (args: unknown) => {
+        s.record('lookupRecordsByBody', args);
+        return { data: [], nextCursor: null };
+      },
+    },
+  } as never;
+  const tool = recordQuery({ client, log });
+
+  // A stray space after the comma parses to the same 2 legs locally, but the backend's
+  // composite identity is an exact `fieldNames.join(',')` — forwarding the raw string
+  // would send a field the schema doesn't recognize as composite at all.
+  await tool.handler({ type: 'ticket', field: 'status, area', values: ['open', 'billing'] }, {});
+  const a = s.calls.at(-1)!.args as Record<string, unknown>;
+  assert.equal(a.field, 'status,area', 'forwarded field is normalized, not the raw "status, area"');
+});
+
+test('record_query rejects lookup-mode args supplied without `field` (silently ignored by list mode otherwise)', async () => {
+  const s = spy();
+  const client = {
+    records: {
+      listRecords: async (args: unknown) => {
+        s.record('listRecords', args);
+        return { data: [{ id: 'r1' }, { id: 'r2' }, { id: 'r3' }], nextCursor: null };
+      },
+    },
+  } as never;
+  const tool = recordQuery({ client, log });
+
+  for (const badArgs of [
+    { type: 'ticket', value: 'open' },
+    { type: 'ticket', values: ['open', 'billing'] },
+    { type: 'ticket', from: 'a', to: 'z' },
+    { type: 'ticket', prefix: 'op' },
+    { type: 'ticket', sortFrom: '100' },
+    { type: 'ticket', sortTo: '200' },
+  ]) {
+    const result = await tool.handler(badArgs, {});
+    assert.equal(result.isError, true, `expected rejection for ${JSON.stringify(badArgs)}`);
+    assert.match(result.content[0].text, /require 'field'/i);
+  }
+  assert.equal(s.calls.length, 0, 'none of these silently fall through to list mode');
+});
+
 test('record_query enters list mode when only type (+ optional owner) present + unwraps {data}', async () => {
   const s = spy();
   const client = {
@@ -1089,6 +1276,10 @@ test('current_identity with no apiKey/env in ctx returns derived-only', async ()
   assert.equal(body.status, 'ok');
   assert.equal(body.environment, undefined, 'no env to derive from');
   assert.equal(body.principalType, undefined, 'no key to derive from');
+  // mcpServerVersion/sdkVersion are always present, even on the no-fetch derived-only
+  // path (BUILD_INFO falls back to 'dev' under tsx; see build-info.test.ts).
+  assert.equal(body.mcpServerVersion, 'dev');
+  assert.equal(body.sdkVersion, 'dev');
 });
 
 test('current_identity derives environment + principalType from ctx (degraded mode — empty ping body)', async () => {
@@ -1147,6 +1338,36 @@ test('current_identity merges extended ping response over derived fields', async
     assert.deepEqual(body.dataScope, { userId: 'usr_alice', scopes: ['org:org_clin'] });
     // Status is always 'ok' on 2xx.
     assert.equal(body.status, 'ok');
+    // mcpServerVersion/sdkVersion survive the extended-response merge too.
+    assert.equal(body.mcpServerVersion, 'dev');
+    assert.equal(body.sdkVersion, 'dev');
+  } finally {
+    f.restore();
+  }
+});
+
+test('current_identity: mcpServerVersion/sdkVersion are always client-derived, never backend-overridable', async () => {
+  // Defensive: the backend has no way to know what a given MCP server binary
+  // shipped with, so even if /v1/ping ever echoed these keys back, the
+  // client-stamped BUILD_INFO values must win (see identity.ts's merge order).
+  const extendedResponse = JSON.stringify({
+    status: 'ok',
+    mcpServerVersion: '99.99.99',
+    sdkVersion: '99.99.99',
+  });
+  const f = stubFetch({ status: 200, body: extendedResponse });
+  try {
+    const tool = currentIdentity({
+      client: {} as never,
+      log,
+      apiKey: 'ssk_live_abc123',
+      environment: 'https://api.staging.vectros.ai',
+    });
+    const r = await tool.handler({}, {});
+    assert.ok(!r.isError);
+    const body = parsedText(r) as Record<string, unknown>;
+    assert.equal(body.mcpServerVersion, 'dev', 'client-derived value wins over a spoofed backend field');
+    assert.equal(body.sdkVersion, 'dev', 'client-derived value wins over a spoofed backend field');
   } finally {
     f.restore();
   }

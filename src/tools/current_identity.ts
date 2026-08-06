@@ -20,6 +20,12 @@
  * environment + principalType) so the no-fetch path — a test mock or a
  * programmatic embedder that omits apiKey/environment — degrades cleanly
  * rather than throwing; see resolveIdentity's contract.
+ *
+ * `mcpServerVersion` + `sdkVersion` are always client-derived — see
+ * build-info.ts — never fetched from the backend, which has no way to know
+ * what a given MCP server binary shipped with. The server-side `apiVersion`
+ * leg (the deployed API build id) is a separate, backend-reported concept
+ * and does not ship here.
  */
 import type { ToolFactory, ToolResult } from './types.js';
 import { toolError } from './errors.js';
@@ -36,8 +42,10 @@ const currentIdentity: ToolFactory = ({ log, apiKey, environment }) => ({
     "Describe the credential the MCP server is operating under. Returns tenantId, environment " +
     "(staging|production), principalType (root_key|scoped_key|token), principalKeyId, principalLabel, " +
     "and (for scoped credentials) allowedActions plus dataScope — the credential's reach as { userId, " +
-    "scopes[] }, where each scope is a `namespace:value` string (e.g. \"org:<uuid>\"). Use this when the " +
-    "user asks 'what can you do here?' or 'what tenant am I in?'. Calls GET /v1/ping under the hood.",
+    "scopes[] }, where each scope is a `namespace:value` string (e.g. \"org:<uuid>\"). Also reports " +
+    "mcpServerVersion (this server's own package version) and sdkVersion (the bundled @vectros-ai/sdk " +
+    "version) so a caller can tell what build it's talking to. Use this when the user asks 'what can you " +
+    "do here?', 'what tenant am I in?', or 'what version is this?'. Calls GET /v1/ping under the hood.",
   inputSchema,
   handler: async (): Promise<ToolResult> => {
     try {
