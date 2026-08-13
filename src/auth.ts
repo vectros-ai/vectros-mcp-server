@@ -6,7 +6,7 @@
  *            warn the user on accept.
  *   ssk_*  — server-side scoped key. Long-lived, narrowable scope.
  *            The RECOMMENDED credential for MCP. Accept silently.
- *   st_*   — short-lived KMS-signed JWT (1h default / 24h max).
+ *   st_*   — short-lived KMS-signed JWT (1h default, and 1h max).
  *            Will expire mid-session; warn the user on accept.
  *
  * See the Vectros developer documentation on the auth model and
@@ -76,7 +76,7 @@ export function warnOnSuboptimalKey(key: KeyInfo, log: Logger): void {
   } else if (key.prefix === 'st') {
     log.warn(
       { prefix: key.prefix, env: key.env },
-      'short-lived token (st_*) will expire mid-session (1h default, 24h max). ' +
+      'short-lived token (st_*) will expire mid-session (1h max). ' +
         'For long-running MCP installs, prefer a long-lived ssk_* key.',
     );
   }

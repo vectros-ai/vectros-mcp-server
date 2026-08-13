@@ -3,6 +3,15 @@
 All notable changes to `@vectros-ai/mcp-server` are documented here.
 This project adheres to [Semantic Versioning](https://semver.org).
 
+## 0.14.0
+
+### Changed
+
+- **Repinned to `@vectros-ai/sdk` 0.39.0.**
+- **The `st_*` short-lived-token warning now states a 1-hour maximum, matching the
+  platform's narrowed cap** — it previously read "(1h default, 24h max)"; the 24h
+  ceiling no longer exists, so it now reads "(1h max)".
+
 ## 0.13.0
 
 ### Added
