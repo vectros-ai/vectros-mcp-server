@@ -3,6 +3,29 @@
 All notable changes to `@vectros-ai/mcp-server` are documented here.
 This project adheres to [Semantic Versioning](https://semver.org).
 
+## 0.15.0
+
+### Added
+
+- **`lookup_principal` accepts an optional `contextId`** for entity kinds (`org`/`client`/any
+  namespace you registered — not `user`, which is always tenant-wide). A namespace registration
+  can now be tenant-wide or owned by one app context (API 0.40.0). A context-confined credential's
+  own context resolves automatically without this; an unconfined (root-key) credential needs
+  `contextId` to reach a context-owned namespace's entities — omitting it previously read back an
+  empty result with no indication why. Two rejections come with it: supplying `contextId` with
+  `kind: "user"` now returns `isError: true` immediately (the user surface is always tenant-wide);
+  supplying it against a namespace that turns out to be tenant-wide is rejected by the API with a
+  `400`.
+
+### Changed
+
+- **Repinned to `@vectros-ai/sdk` 0.40.0.**
+- **`current_identity` (and the `identity` resource) now note that `granted_capabilities` — a scope
+  clause's API-0.40.0 reach dimension (`member-lifecycle` / `forensic-read` / `context-directory-read`
+  / `delegate-mint`) — isn't reported by `/v1/ping` yet**, so `allowedActions` + `dataScope` may
+  understate a credential's true reach. This is a description-accuracy fix (the tool no longer implies
+  it shows the complete picture); no new field ships, since the backend doesn't emit one yet.
+
 ## 0.14.0
 
 ### Changed

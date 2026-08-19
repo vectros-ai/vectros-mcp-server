@@ -451,6 +451,10 @@ test('lookup_principal rejects missing kind', () => {
   assert.ok(!r.success, 'kind is required');
 });
 
+test('lookup_principal accepts contextId (schema-level: entity-vs-user rejection is a handler check, not the schema)', () => {
+  assert.ok(validate('lookup_principal', { kind: 'team', externalId: 'x', contextId: 'ctx_1' }).success);
+});
+
 // version_history ---------------------------------------------------------
 test('version_history accepts record + document resourceType', () => {
   assert.ok(validate('version_history', { resourceType: 'record', id: 'r1' }).success);

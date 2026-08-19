@@ -38,8 +38,8 @@ const inputSchema = {
     .optional()
     .describe(
       'List mode: filter to folders carrying this scope value, in `namespace:value` form ' +
-        '(e.g. "org:<uuid>", "client:<uuid>", "group:eng-team"). `org` and `client` are built-in ' +
-        'namespaces; others are custom scopes you define.',
+        '(e.g. "org:<uuid>", "client:<uuid>", "group:eng-team"). `org` and `client` are reserved ' +
+        'namespace names, registered like any other; others are namespaces you registered yourself.',
     ),
   startFrom: z
     .string()

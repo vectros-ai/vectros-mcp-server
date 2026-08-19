@@ -118,8 +118,8 @@ const inputSchema = {
     .optional()
     .describe(
       'Restrict to content carrying this scope value, in `namespace:value` form (e.g. "org:<uuid>", ' +
-        '"client:<uuid>", "group:eng-team"). `org` and `client` are built-in namespaces; others are ' +
-        'custom scopes you define.',
+        '"client:<uuid>", "group:eng-team"). `org` and `client` are reserved namespace names, ' +
+        'registered like any other; others are namespaces you registered yourself.',
     ),
   // Date window.
   createdAfter: z

@@ -32,7 +32,8 @@ const inputSchema = {
     .optional()
     .describe(
       'Scope ownership as `namespace:value` entries, at most 2 (e.g. ["org:<uuid>", "group:eng-team"]). ' +
-        '`org` and `client` are built-in namespaces; others are custom scopes you define. This is the ' +
+        '`org` and `client` are reserved namespace names, registered like any other; others are ' +
+        'namespaces you registered yourself. This is the ' +
         'folder\'s COMPLETE scope declaration and values must come from the credential\'s own identity. ' +
         'An empty array `[]` creates a PRIVATE folder owned by the calling user alone. Omit to stamp the ' +
         'credential\'s full identity — the default.',

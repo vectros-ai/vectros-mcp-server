@@ -66,8 +66,8 @@ const inputSchema = {
         .optional()
         .describe(
           'Restrict retrieval to content carrying this scope value, in `namespace:value` form ' +
-            '(e.g. "org:<uuid>", "client:<uuid>", "group:eng-team"). `org` and `client` are built-in ' +
-            'namespaces; others are custom scopes you define.',
+            '(e.g. "org:<uuid>", "client:<uuid>", "group:eng-team"). `org` and `client` are reserved ' +
+            'namespace names, registered like any other; others are namespaces you registered yourself.',
         ),
       folderId: z.string().optional().describe('Restrict retrieval to this exact folder.'),
       rootFolderId: z.string().optional().describe('Restrict retrieval to this folder and all its descendants.'),

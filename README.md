@@ -213,8 +213,8 @@ available.
 
 | Tool | What it does |
 |---|---|
-| `current_identity` | Describe the credential: tenantId, environment, principalType, principalKeyId, and (for scoped credentials) allowedActions + dataScope. Also reports this server's own version and the bundled SDK version (`mcpServerVersion`, `sdkVersion`). |
-| `lookup_principal` | Resolve a user / org / client by your own `externalId` (→ its Vectros UUID, for the ownership filters) or by a schema lookup field. Read-only. |
+| `current_identity` | Describe the credential: tenantId, environment, principalType, principalKeyId, principalLabel, and (for scoped credentials) allowedActions + dataScope. Does **not** yet include `granted_capabilities` (`member-lifecycle` / `forensic-read` / `context-directory-read` / `delegate-mint`) — a separate reach dimension a scope clause can carry as of API 0.40.0 that `/v1/ping` doesn't report yet, so allowedActions + dataScope may understate a credential's true reach. Also reports this server's own version and the bundled SDK version (`mcpServerVersion`, `sdkVersion`). |
+| `lookup_principal` | Resolve a user, or an identity entity in a namespace (`org`/`client`/any namespace you registered), by your own `externalId` (→ its Vectros UUID, for the ownership filters) or by a schema lookup field. Pass `contextId` to target a specific app context for a context-owned namespace. Read-only. |
 | `version_history` | Read the audit/version trail (CREATE/UPDATE/DELETE, with actor + diff) for one record or document. Read-only. |
 
 All 21 tools wrap published Vectros HTTP API endpoints. JSON

@@ -16,7 +16,18 @@
  *
  * Orgs and clients are namespaces over a generic identity-entity model: `user`
  * is the fixed principal surface; every other `kind` is an entity namespace
- * (`org`/`client` — built in — or one you registered).
+ * (`org`/`client` — reserved names, registered like any other — or one you
+ * registered yourself).
+ *
+ * `contextId` (entity kinds only): a namespace registration is either
+ * tenant-wide (its entities are visible everywhere, today's default for
+ * `org`/`client` and any namespace registered without a context) or owned by
+ * one app context (invisible outside it). A context-confined credential's own
+ * context resolves automatically without this arg; pass it to name a specific
+ * context when the credential is unconfined (a root key) and the namespace is
+ * context-owned, or to be explicit. Rejected for `kind: "user"` (the user
+ * surface is always tenant-wide) and for a namespace that turns out to be
+ * tenant-wide (the API itself rejects that combination).
  *
  * Why this exists: the ownership filters on record_query / document_query /
  * hybrid_search / rag_ask take the Vectros-assigned UUID, but an agent usually
@@ -46,7 +57,7 @@ const inputSchema = {
     .string()
     .describe(
       'Which principal to look up: "user" (the fixed principal surface), or an entity namespace — ' +
-        '"org", "client" (built in), or a namespace you registered.',
+        '"org", "client" (reserved, registered like any other), or a namespace you registered.',
     ),
   externalId: z
     .string()
@@ -55,6 +66,16 @@ const inputSchema = {
       'Resolve mode: your own stable identifier for the principal. Returns the single matching principal ' +
         '(with its Vectros UUID), or an empty array if none. The fastest path to the UUID the ownership ' +
         'filters need. Takes precedence if both this and a `field` lookup are supplied.',
+    ),
+  contextId: z
+    .string()
+    .optional()
+    .describe(
+      'Entity kinds only (not `user`, which is always tenant-wide): the app context to look up entities ' +
+        'in, for a namespace registered as context-owned rather than tenant-wide. A context-confined ' +
+        "credential's own context is used automatically without this; supply it to name a context " +
+        'explicitly (required for an unconfined/root credential to reach a context-owned namespace). ' +
+        'Rejected if the namespace turns out to be tenant-wide.',
     ),
   // Lookup-mode args — provide `field` plus EXACTLY ONE of: value | from+to | prefix.
   type: z
@@ -101,15 +122,18 @@ const lookupPrincipal: ToolFactory = ({ client, log }) => ({
     'ownership filters on record_query / hybrid_search / rag_ask expect).\n' +
     '  • Lookup by a schema field: pass `type` and `field` plus exactly one of `value` (exact), `from`+`to` ' +
     '(range), or `prefix`. Sensitive-field-safe. (If both `externalId` and a `field` lookup are given, ' +
-    '`externalId` wins.) Returns a `{ data, nextCursor }` page (default 10, max 100 — raise it in one call ' +
-    'when you can accept the payload); a non-null `nextCursor` means more remain — pass it back as `startFrom`. ' +
-    'Read-only — does not create or modify identities.',
+    '`externalId` wins.) For an entity kind, `contextId` names a specific app context when the namespace ' +
+    "is context-owned rather than tenant-wide; a context-confined credential's own context is used " +
+    'automatically without it. Returns a `{ data, nextCursor }` page (default 10, max 100 — raise it in ' +
+    'one call when you can accept the payload); a non-null `nextCursor` means more remain — pass it back ' +
+    'as `startFrom`. Read-only — does not create or modify identities.',
   inputSchema,
   handler: async (args): Promise<ToolResult> => {
     const kind = args.kind as string;
     const isUser = kind === 'user';
     const limit = (args.limit as number | undefined) ?? MCP_DEFAULT_LIMIT;
     const externalId = args.externalId as string | undefined;
+    const contextId = args.contextId as string | undefined;
     const type = args.type as string | undefined;
     const field = args.field as string | undefined;
     const value = args.value as string | undefined;
@@ -119,6 +143,22 @@ const lookupPrincipal: ToolFactory = ({ client, log }) => ({
     const order = args.order as 'asc' | 'desc' | undefined;
     const startFrom = args.startFrom as string | undefined;
 
+    // contextId only means anything for an entity namespace — the user surface is always
+    // tenant-wide, so a caller-supplied contextId there is a caller error, not a silent no-op.
+    if (contextId !== undefined && isUser) {
+      return toolError(
+        'lookup_principal',
+        new Error("'contextId' does not apply to kind 'user' — the user surface is always tenant-wide."),
+      );
+    }
+    // Spread conditionally rather than passing `contextId` unconditionally as a shorthand
+    // property: `{ contextId }` with `contextId === undefined` still creates an OWN key whose
+    // value is undefined, and whether the SDK's request serialization treats an explicit
+    // `undefined` value the same as an absent key is not a guarantee we rely on — every existing
+    // caller that never supplies `contextId` (i.e. every call before this param existed) must see
+    // the key absent from the wire request, not present-with-value-undefined.
+    const contextIdArg = contextId !== undefined ? { contextId } : {};
+
     try {
       let page: Page<unknown>;
       if (externalId !== undefined) {
@@ -127,8 +167,8 @@ const lookupPrincipal: ToolFactory = ({ client, log }) => ({
         // most one principal, so nextCursor is always null here.
         page = isUser
           ? await client.identity.listUsers({ externalId, limit })
-          : await client.identity.listEntities({ namespace: kind, externalId, limit });
-        log.debug({ tool: 'lookup_principal', mode: 'resolve', kind }, 'lookup_principal resolve ok');
+          : await client.identity.listEntities({ namespace: kind, ...contextIdArg, externalId, limit });
+        log.debug({ tool: 'lookup_principal', mode: 'resolve', kind, contextId }, 'lookup_principal resolve ok');
       } else if (field !== undefined) {
         // Lookup mode — validate exactly one lookup shape, then require `type`.
         const hasEquality = value !== undefined;
@@ -162,8 +202,8 @@ const lookupPrincipal: ToolFactory = ({ client, log }) => ({
         const req = { type, field, value, from, to, prefix, order, startFrom, limit };
         page = isUser
           ? await client.identity.lookupUsers(req)
-          : await client.identity.lookupEntities({ namespace: kind, body: req });
-        log.debug({ tool: 'lookup_principal', mode: 'lookup', kind, type, field }, 'lookup_principal lookup ok');
+          : await client.identity.lookupEntities({ namespace: kind, ...contextIdArg, body: req });
+        log.debug({ tool: 'lookup_principal', mode: 'lookup', kind, type, field, contextId }, 'lookup_principal lookup ok');
       } else {
         return toolError(
           'lookup_principal',
@@ -175,7 +215,7 @@ const lookupPrincipal: ToolFactory = ({ client, log }) => ({
       const nextCursor = page.nextCursor ?? null;
       return { content: [{ type: 'text', text: JSON.stringify({ data: principals, nextCursor }, null, 2) }] };
     } catch (err) {
-      log.warn({ tool: 'lookup_principal', kind, err: String(err) }, 'lookup_principal failed');
+      log.warn({ tool: 'lookup_principal', kind, contextId, err: String(err) }, 'lookup_principal failed');
       return toolError('lookup_principal', err);
     }
   },

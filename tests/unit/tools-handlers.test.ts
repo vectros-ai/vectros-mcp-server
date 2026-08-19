@@ -2622,6 +2622,62 @@ test('lookup_principal surfaces a backend error verbatim', async () => {
   assert.match(r.content[0].text, /Insufficient scope/);
 });
 
+test('lookup_principal forwards contextId to listEntities (resolve) and lookupEntities (lookup)', async () => {
+  const s = spy();
+  const client = {
+    identity: {
+      listEntities: async (a: unknown) => { s.record('listEntities', a); return { data: [{ id: 'e1' }] }; },
+      lookupEntities: async (a: unknown) => { s.record('lookupEntities', a); return { data: [] }; },
+    },
+  } as never;
+  const tool = lookupPrincipal({ client, log });
+
+  await tool.handler({ kind: 'team', externalId: 'ext_1', contextId: 'ctx_1' }, {});
+  assert.equal(s.calls[0].method, 'listEntities');
+  assert.equal((s.calls[0].args as Record<string, unknown>).contextId, 'ctx_1');
+
+  await tool.handler({ kind: 'team', type: 'team_v1', field: 'tier', value: 'gold', contextId: 'ctx_1' }, {});
+  assert.equal(s.calls[1].method, 'lookupEntities');
+  assert.equal((s.calls[1].args as Record<string, unknown>).contextId, 'ctx_1');
+});
+
+test('lookup_principal omits contextId entirely (not present-with-value-undefined) when the caller never supplies it', async () => {
+  // Every call made before this param existed never supplies contextId — the wire request must see
+  // the key ABSENT, not present with an undefined value (which some serializers stringify literally
+  // as "undefined", and which a supplied-vs-omitted distinction elsewhere in this codebase already
+  // treats as meaningfully different). Guards against a shorthand-property regression
+  // (`{ contextId }` with contextId===undefined still creates an own key).
+  const s = spy();
+  const client = {
+    identity: {
+      listEntities: async (a: unknown) => { s.record('listEntities', a); return { data: [{ id: 'e1' }] }; },
+      lookupEntities: async (a: unknown) => { s.record('lookupEntities', a); return { data: [] }; },
+    },
+  } as never;
+  const tool = lookupPrincipal({ client, log });
+
+  await tool.handler({ kind: 'org', externalId: 'ext_1' }, {});
+  assert.equal(s.calls[0].method, 'listEntities');
+  assert.ok(
+    !Object.prototype.hasOwnProperty.call(s.calls[0].args, 'contextId'),
+    `listEntities args must not carry a contextId key when omitted: ${JSON.stringify(s.calls[0].args)}`,
+  );
+
+  await tool.handler({ kind: 'org', type: 'org_v1', field: 'name', value: 'Acme' }, {});
+  assert.equal(s.calls[1].method, 'lookupEntities');
+  assert.ok(
+    !Object.prototype.hasOwnProperty.call(s.calls[1].args, 'contextId'),
+    `lookupEntities args must not carry a contextId key when omitted: ${JSON.stringify(s.calls[1].args)}`,
+  );
+});
+
+test('lookup_principal rejects contextId on kind "user" (always tenant-wide)', async () => {
+  const tool = lookupPrincipal({ client: {} as never, log });
+  const r = await tool.handler({ kind: 'user', externalId: 'usr_1', contextId: 'ctx_1' }, {});
+  assert.equal(r.isError, true);
+  assert.match(r.content[0].text, /does not apply to kind 'user'/);
+});
+
 // ── version_history ──────────────────────────────────────────────────────────
 
 test('version_history dispatches record vs document and returns {data, nextCursor}', async () => {

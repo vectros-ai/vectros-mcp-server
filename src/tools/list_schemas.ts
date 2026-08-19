@@ -38,7 +38,7 @@ const inputSchema = {
     .optional()
     .describe(
       'Filter to schemas carrying this scope value, in `namespace:value` form (e.g. "org:<uuid>", ' +
-        '"group:eng-team"). `org` and `client` are built-in namespaces. Optional; default returns all ' +
+        '"group:eng-team"). `org` and `client` are reserved namespace names, registered like any other. Optional; default returns all ' +
         'schemas the credential can see.',
     ),
   surface: z

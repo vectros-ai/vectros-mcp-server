@@ -70,7 +70,7 @@ const inputSchema = {
     .optional()
     .describe(
       'Reassign scope ownership as `namespace:value` entries, at most 2 (e.g. ["org:<uuid>", ' +
-        '"group:eng-team"]) — the COMPLETE new parent set. `org`/`client` are built-in namespaces. ' +
+        '"group:eng-team"]) — the COMPLETE new parent set. `org`/`client` are reserved namespace names, registered like any other. ' +
         'Omit to leave ownership unchanged; `[]` clears it (private to the owning user).',
     ),
   expectedVersion: z
