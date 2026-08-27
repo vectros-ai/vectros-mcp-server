@@ -169,7 +169,7 @@ Add `-e VECTROS_API_BASE_URL=https://api.staging.vectros.ai` for a non-productio
 environment. Reopen the project in Claude Code and the Vectros tools are
 available.
 
-## Tools (21 tools)
+## Tools (22 tools)
 
 **Search & RAG**
 
@@ -186,6 +186,7 @@ available.
 | `list_schemas` | List the record-schema catalog the credential can see (filter by `surface` or resolve one by `recordType`). Makes `record_query` / `record_create` discoverable. |
 | `record_query` | Query records by lookup field — equality (`value`), range, or prefix, with `asc`/`desc` ordering and an optional `sortFrom`/`sortTo` window — or list mode (filter by ownership + type). Also supports composite equality across 2-3 fields (`values`), but only against a lookup the *schema* declares over those fields together (see `list_schemas`) — not any two fields you pick. |
 | `record_get` | Fetch one record by id, including its full payload (large payloads truncated to protect the agent context window). |
+| `record_batch_get` | Fetch several records by id (1-100) in one call, each with its full payload. Returns `missingIds` for any requested id you can't access, since the API silently omits them. |
 | `record_create` | Create a record of a given type; idempotent by `externalId`; optional per-record `indexMode`. |
 | `record_update` | Patch a record's payload (deep-merged; `null` deletes a key); optimistic concurrency via `expectedVersion`. |
 | `record_delete` | Permanently delete a record by id (leaves a tombstone). |
@@ -217,7 +218,7 @@ available.
 | `lookup_principal` | Resolve a user, or an identity entity in a namespace (`org`/`client`/any namespace you registered), by your own `externalId` (→ its Vectros UUID, for the ownership filters) or by a schema lookup field. Pass `contextId` to target a specific app context for a context-owned namespace. Read-only. |
 | `version_history` | Read the audit/version trail (CREATE/UPDATE/DELETE, with actor + diff) for one record or document. Read-only. |
 
-All 21 tools wrap published Vectros HTTP API endpoints. JSON
+All 22 tools wrap published Vectros HTTP API endpoints. JSON
 responses are what the agent sees as tool output. Per-call cost
 surfaces via the `usage` field on inference responses.
 

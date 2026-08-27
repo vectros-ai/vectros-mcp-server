@@ -200,7 +200,7 @@ test('rag_ask passes the retrieval scope filter through', async () => {
 // the input schema entirely — so a refactor that dropped `scope`/`scopes` from a
 // tool's `inputSchema` (while leaving the handler passthrough) would keep them
 // green even though an MCP client could no longer PASS the param. On a public
-// surface an undeclared-but-honored param is unreachable (the #106 class). Pin
+// surface an undeclared-but-honored param is unreachable. Pin
 // the DECLARATION itself.
 test('every scope-bearing tool DECLARES its scope/scopes param in inputSchema (client reachability)', () => {
   const deps = { client: {} as never, log };

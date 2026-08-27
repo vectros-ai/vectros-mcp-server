@@ -3,6 +3,23 @@
 All notable changes to `@vectros-ai/mcp-server` are documented here.
 This project adheres to [Semantic Versioning](https://semver.org).
 
+## 0.16.0 — 2026-08-27
+
+### Added
+
+- **`record_batch_get`** — fetch several structured records by id (1-100) in one call, each with its
+  full payload, wrapping `POST /v1/records/batch-get` (0.41.0: previously a `501` stub, now live).
+  Complements `record_get`: use this instead of N single-id calls when you already hold several ids
+  (e.g. hydrating a page of `record_query`/`hybrid_search` results). The API silently omits any id you
+  can't access with no per-id existence signal; the response also carries `missingIds` — every
+  requested id not present in `data` — so a caller can tell a partial result from a complete one
+  without diffing it by hand. Same per-record payload-truncation guard as `record_get`.
+- **Repinned to `@vectros-ai/sdk` 0.41.0** for the above. No other 0.41.0 surface change is consumed:
+  the issuer-update endpoint and the `roleIds` access-profile field are identity/access administration
+  this server's tools deliberately don't touch (`lookup_principal`'s own docstring: "identity CRUD
+  stays off the agent tool surface by design"); entity responses' new `contextId` field already flows
+  through `lookup_principal`'s pass-through JSON with no code change.
+
 ## 0.15.0
 
 ### Added

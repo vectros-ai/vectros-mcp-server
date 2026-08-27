@@ -10,6 +10,7 @@ import type { ToolFactory } from './types.js';
 import hybridSearch from './hybrid_search.js';
 import recordQuery from './record_query.js';
 import recordGet from './record_get.js';
+import recordBatchGet from './record_batch_get.js';
 import recordCreate from './record_create.js';
 import recordUpdate from './record_update.js';
 import recordDelete from './record_delete.js';
@@ -33,6 +34,7 @@ export const ALL_TOOL_FACTORIES: Record<string, ToolFactory> = {
   hybrid_search: hybridSearch,
   record_query: recordQuery,
   record_get: recordGet,
+  record_batch_get: recordBatchGet,
   record_create: recordCreate,
   record_update: recordUpdate,
   record_delete: recordDelete,

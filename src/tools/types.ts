@@ -28,11 +28,14 @@ import type { Logger } from '../log.js';
  * parity sweep:               lookup_principal (identity resolution for the
  *                             ownership filters), version_history (record/document
  *                             audit trail)
+ * 0.41.0 SDK adoption:        record_batch_get (POST /v1/records/batch-get went
+ *                             live in 0.41.0 — previously a 501 stub)
  */
 export const TOOL_NAMES = [
   'hybrid_search',
   'record_query',
   'record_get',
+  'record_batch_get',
   'record_create',
   'record_update',
   'record_delete',

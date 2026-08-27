@@ -155,7 +155,7 @@ test('hybrid_search returns isError when SDK throws', async () => {
   assert.match(r.content[0].text, /upstream 503/);
 });
 
-// --- response ergonomics (#545) ---
+// --- response ergonomics ---
 
 /** A hybrid_search client whose search.content returns a fixed result. */
 function searchClientReturning(result: unknown) {
@@ -1208,7 +1208,7 @@ test('document_get surfaces getDocument errors as tool error', async () => {
   assert.match(r.content[0].text, /404/);
 });
 
-// #784: the selector-validation error must name the document tools' own public
+// The selector-validation error must name the document tools' own public
 // param (`documentId`), not the resolver's internal `id` field — a caller who
 // reasonably assumes symmetry with record_get (which genuinely uses `id`)
 // must not be told to "fix" a parameter document_get never accepted.
@@ -2032,7 +2032,7 @@ test('document_update returns isError when SDK throws', async () => {
   assert.equal(r.isError, true);
 });
 
-// #784: same fix as document_get — document_update remaps its own `documentId`
+// Same fix as document_get — document_update remaps its own `documentId`
 // into the resolver's internal `id` field at its own call site, an independent
 // place the defect could regress even though document_get's call site is fixed.
 test('document_update errors (no SDK call) when neither documentId nor externalId is given', async () => {

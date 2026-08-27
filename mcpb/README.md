@@ -9,7 +9,7 @@ install for [Claude Desktop](https://claude.ai/download). Instead of editing
 
 - [`manifest.json`](./manifest.json) — the extension manifest
   ([MCPB spec](https://github.com/anthropics/mcpb), `manifest_version` 0.3). It
-  declares the server, the 21 tools, and a single **sensitive** user-config
+  declares the server, the 22 tools, and a single **sensitive** user-config
   field for `VECTROS_API_KEY`.
 - [`server/index.js`](./server/index.js) — a tiny launcher Claude Desktop runs.
   It execs the published `@vectros-ai/mcp-server` over stdio via `npx`, so the

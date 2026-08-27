@@ -77,6 +77,8 @@ test('spawn stdio server + handshake + list_tools', async () => {
         // parity sweep
         'lookup_principal',
         'version_history',
+        // 0.41.0 SDK adoption
+        'record_batch_get',
       ].sort(),
     );
 
@@ -130,7 +132,7 @@ test('tools/call dispatch fails closed: unknown tool + invalid args (no SDK call
     assert.equal(badArgs.isError, true, 'invalid args → isError');
     assert.match(JSON.stringify(badArgs.content), /Invalid arguments/);
 
-    // #543 finding 1 (the highest-severity cold-agent trap): an INVENTED top-level arg
+    // The highest-severity cold-agent trap found in review: an INVENTED top-level arg
     // must ERROR, not silently fall through to a default mode. Before strict validation,
     // `record_query {type, filter:{…}}` dropped `filter` and ran in list mode, returning
     // wrong-but-plausible results. Now it is rejected, naming the offending key + the

@@ -26,6 +26,7 @@ import currentIdentity from '../../src/tools/current_identity.js';
 import documentIngest from '../../src/tools/document_ingest.js';
 import recordCreate from '../../src/tools/record_create.js';
 import recordGet from '../../src/tools/record_get.js';
+import recordBatchGet from '../../src/tools/record_batch_get.js';
 import recordUpdate from '../../src/tools/record_update.js';
 import recordDelete from '../../src/tools/record_delete.js';
 import lookupPrincipal from '../../src/tools/lookup_principal.js';
@@ -54,6 +55,7 @@ const tools = {
   document_ingest: documentIngest({ client: fakeClient, log }),
   record_create: recordCreate({ client: fakeClient, log }),
   record_get: recordGet({ client: fakeClient, log }),
+  record_batch_get: recordBatchGet({ client: fakeClient, log }),
   record_update: recordUpdate({ client: fakeClient, log }),
   record_delete: recordDelete({ client: fakeClient, log }),
   lookup_principal: lookupPrincipal({ client: fakeClient, log }),
@@ -415,6 +417,21 @@ test('folder_delete accepts an id', () => {
 test('folder_delete rejects empty id', () => {
   const r = validate('folder_delete', { id: '' });
   assert.ok(!r.success);
+});
+
+// record_batch_get ----------------------------------------------------------
+test('record_batch_get accepts 1 to the API max (100) ids', () => {
+  assert.ok(validate('record_batch_get', { ids: ['rec_1'] }).success);
+  assert.ok(validate('record_batch_get', { ids: Array.from({ length: 100 }, (_, i) => `rec_${i}`) }).success, 'limit:100 (the API max) is allowed');
+});
+
+test('record_batch_get rejects an empty ids array or more than 100', () => {
+  assert.ok(!validate('record_batch_get', { ids: [] }).success, 'empty array rejected — nothing to fetch');
+  assert.ok(!validate('record_batch_get', { ids: Array.from({ length: 101 }, (_, i) => `rec_${i}`) }).success, '101 exceeds the API max');
+});
+
+test('record_batch_get rejects missing ids', () => {
+  assert.ok(!validate('record_batch_get', {}).success);
 });
 
 // record_create -----------------------------------------------------------

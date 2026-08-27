@@ -25,7 +25,7 @@ export type Resolved = { id: string } | { error: string };
  * `documentId` for the document tools, `id` for the record tools) — the two
  * messages below must name what the caller actually passed, not this
  * function's internal `Selector.id` field, or the error tells the caller to
- * "fix" a parameter that was never wrong (#784).
+ * "fix" a parameter that was never wrong.
  */
 function validateSelector(sel: Selector, entity: string, fieldName: string): string | undefined {
   const hasId = sel.id !== undefined && sel.id !== '';

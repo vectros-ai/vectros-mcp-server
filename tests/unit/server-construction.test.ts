@@ -61,6 +61,8 @@ test('construction with default tools registers every shipped tool', () => {
       // parity sweep
       'lookup_principal',
       'version_history',
+      // 0.41.0 SDK adoption
+      'record_batch_get',
     ].sort(),
   );
 });

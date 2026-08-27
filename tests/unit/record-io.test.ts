@@ -1,17 +1,20 @@
 /**
  * Unit tests for the records-I/O tier (launch data-plane surface, tier 1):
- * record_get, record_create, record_update, record_delete. Mocked SDK client.
+ * record_get, record_batch_get, record_create, record_update, record_delete.
+ * Mocked SDK client.
  *
  * Focus: the logic that isn't just args-passthrough — typeName-direct create
  * (no schemaId pre-fetch), the RFC-7386 merge-patch update (payload sent
  * as-is for the server to deep-merge; optimistic-concurrency via expectedVersion),
- * payload truncation in get, and the scope-error path.
+ * payload truncation in get/batch-get, the missingIds diff in batch-get, and
+ * the scope-error path.
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import pino from 'pino';
 
 import recordGet from '../../src/tools/record_get.js';
+import recordBatchGet from '../../src/tools/record_batch_get.js';
 import recordCreate from '../../src/tools/record_create.js';
 import recordUpdate from '../../src/tools/record_update.js';
 import recordDelete from '../../src/tools/record_delete.js';
@@ -81,7 +84,7 @@ test('record_get surfaces SDK errors as isError', async () => {
   assert.match(r.content[0].text, /404/);
 });
 
-test('record_get resolves by externalId + type via lookup, then fetches by id (#543 finding 2)', async () => {
+test('record_get resolves by externalId + type via lookup, then fetches by id', async () => {
   const s = spy();
   const client = {
     records: {
@@ -138,6 +141,95 @@ test('record_get errors when the externalId resolves to nothing', async () => {
   const r = await recordGet({ client, log }).handler({ externalId: 'nope', type: 'control' }, {});
   assert.equal(r.isError, true);
   assert.match(r.content[0].text, /No record of type 'control' with externalId 'nope'/);
+});
+
+// ============================================================================
+// record_batch_get
+// ============================================================================
+
+test('record_batch_get fetches multiple ids in one call and returns them', async () => {
+  const s = spy();
+  const client = {
+    records: {
+      batchGetRecords: async (args: unknown) => {
+        s.record('batchGetRecords', args);
+        return {
+          data: [
+            { id: 'rec_1', typeName: 'task', payload: { title: 'One' } },
+            { id: 'rec_2', typeName: 'task', payload: { title: 'Two' } },
+          ],
+        };
+      },
+    },
+  } as never;
+  const r = await recordBatchGet({ client, log }).handler({ ids: ['rec_1', 'rec_2'] }, {});
+  assert.ok(!r.isError, JSON.stringify(r));
+  assert.deepEqual(s.calls[0].args, { ids: ['rec_1', 'rec_2'] });
+  const body = parsedText(r) as { data: Array<Record<string, unknown>>; missingIds: string[] };
+  assert.equal(body.data.length, 2);
+  assert.equal(body.data[0]?.id, 'rec_1');
+  assert.deepEqual(body.missingIds, [], 'nothing missing when every requested id came back');
+});
+
+test('record_batch_get surfaces missingIds for ids the API silently omitted', async () => {
+  const client = {
+    records: {
+      batchGetRecords: async () => ({ data: [{ id: 'rec_1', payload: {} }] }),
+    },
+  } as never;
+  const r = await recordBatchGet({ client, log }).handler({ ids: ['rec_1', 'rec_missing', 'rec_also_missing'] }, {});
+  assert.ok(!r.isError);
+  const body = parsedText(r) as { data: Array<Record<string, unknown>>; missingIds: string[] };
+  assert.equal(body.data.length, 1);
+  assert.deepEqual(body.missingIds.sort(), ['rec_also_missing', 'rec_missing']);
+});
+
+test('record_batch_get truncates each oversized payload independently (mirrors record_get)', async () => {
+  const big = 'x'.repeat(50_000);
+  const client = {
+    records: {
+      batchGetRecords: async () => ({
+        data: [
+          { id: 'rec_small', payload: { title: 'small' } },
+          { id: 'rec_big', payload: { blob: big } },
+        ],
+      }),
+    },
+  } as never;
+  const r = await recordBatchGet({ client, log }).handler({ ids: ['rec_small', 'rec_big'] }, {});
+  const body = parsedText(r) as { data: Array<Record<string, unknown>> };
+  const small = body.data.find((d) => d.id === 'rec_small')!;
+  const bigItem = body.data.find((d) => d.id === 'rec_big')!;
+  assert.equal(small.payloadTruncated, undefined, 'small payload not truncated');
+  assert.equal(bigItem.payloadTruncated, true);
+  assert.equal(bigItem.payload, undefined, 'structured payload dropped, not replaced by a broken string');
+  assert.equal(typeof bigItem.payloadPreview, 'string');
+});
+
+test('record_batch_get surfaces SDK errors as isError', async () => {
+  const client = {
+    records: {
+      batchGetRecords: async () => {
+        const e = new Error('Insufficient scope: records:r required') as Error & { statusCode: number };
+        e.statusCode = 403;
+        throw e;
+      },
+    },
+  } as never;
+  const r = await recordBatchGet({ client, log }).handler({ ids: ['rec_1'] }, {});
+  assert.equal(r.isError, true);
+  assert.match(r.content[0].text, /403|scope/i);
+});
+
+test('record_batch_get treats an empty API response as all-missing, not an error', async () => {
+  const client = {
+    records: { batchGetRecords: async () => ({}) },
+  } as never;
+  const r = await recordBatchGet({ client, log }).handler({ ids: ['rec_1', 'rec_2'] }, {});
+  assert.ok(!r.isError);
+  const body = parsedText(r) as { data: Array<Record<string, unknown>>; missingIds: string[] };
+  assert.deepEqual(body.data, []);
+  assert.deepEqual(body.missingIds.sort(), ['rec_1', 'rec_2']);
 });
 
 // ============================================================================
@@ -262,7 +354,7 @@ test('record_update forwards expectedVersion + status; server enforces the confl
   assert.equal(body.status, 'ARCHIVED', 'status forwarded when provided');
 });
 
-test('record_update resolves by externalId + type, then patches the resolved id (#543 finding 2)', async () => {
+test('record_update resolves by externalId + type, then patches the resolved id', async () => {
   const s = spy();
   const client = {
     records: {
