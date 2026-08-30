@@ -166,8 +166,23 @@ claude mcp add vectros -e VECTROS_API_KEY=ssk_live_... -- npx -y @vectros-ai/mcp
 ```
 
 Add `-e VECTROS_API_BASE_URL=https://api.staging.vectros.ai` for a non-production
-environment. Reopen the project in Claude Code and the Vectros tools are
-available.
+environment.
+
+**Load it into a session by restarting.** A Claude Code session that was
+already open when you added the server won't pick it up mid-session — fully
+quit and reopen the project (not just re-select the tab). The `/mcp` panel
+shows the connector marketplace, not locally-configured stdio servers, so it
+won't confirm the server is loaded — ask the agent to call a Vectros tool
+instead. Config is keyed by the **git common root**, so a linked worktree
+resolves to its main repo's `.mcp.json` — add and open from the same project.
+
+> **Windows note:** if your `.npmrc` (or a global npm config) points the
+> `@vectros-ai` scope at a private registry, a bare `npx -y @vectros-ai/mcp-server`
+> can resolve an unexpected internal build there instead of the public
+> release — and an internal build is not guaranteed to run on Windows. If the
+> command above fails to start, either remove the scoped-registry override
+> for a plain `npx` run, or pin an explicit version (`npx -y
+> @vectros-ai/mcp-server@<version>`) known to work.
 
 ## Tools (22 tools)
 
@@ -214,7 +229,7 @@ available.
 
 | Tool | What it does |
 |---|---|
-| `current_identity` | Describe the credential: tenantId, environment, principalType, principalKeyId, principalLabel, and (for scoped credentials) allowedActions + dataScope. Does **not** yet include `granted_capabilities` (`member-lifecycle` / `forensic-read` / `context-directory-read` / `delegate-mint`) — a separate reach dimension a scope clause can carry as of API 0.40.0 that `/v1/ping` doesn't report yet, so allowedActions + dataScope may understate a credential's true reach. Also reports this server's own version and the bundled SDK version (`mcpServerVersion`, `sdkVersion`). |
+| `current_identity` | Describe the credential: tenantId, environment, principalType, principalKeyId, principalLabel, and (for scoped credentials) allowedActions + dataScope. Does **not** yet include `granted_capabilities` (`member-lifecycle` / `forensic-read` / `context-directory-read` / `delegate-mint`, as of API 0.40.0, joined by `delegate-principal-stamp` in 0.42.0) — a separate reach dimension a scope clause can carry that `/v1/ping` doesn't report yet, so allowedActions + dataScope may understate a credential's true reach. Also reports this server's own version and the bundled SDK version (`mcpServerVersion`, `sdkVersion`). |
 | `lookup_principal` | Resolve a user, or an identity entity in a namespace (`org`/`client`/any namespace you registered), by your own `externalId` (→ its Vectros UUID, for the ownership filters) or by a schema lookup field. Pass `contextId` to target a specific app context for a context-owned namespace. Read-only. |
 | `version_history` | Read the audit/version trail (CREATE/UPDATE/DELETE, with actor + diff) for one record or document. Read-only. |
 

@@ -30,8 +30,9 @@
  *
  * API 0.40.0 note: a scope clause can now also carry `granted_capabilities`
  * (`member-lifecycle` / `forensic-read` / `context-directory-read` /
- * `delegate-mint`) — a THIRD reach dimension alongside `allowedActions` and
- * `dataScope`. `/v1/ping` does not report it as of this SDK pin, so it is
+ * `delegate-mint`, joined by `delegate-principal-stamp` in 0.42.0) — a THIRD
+ * reach dimension alongside `allowedActions` and `dataScope`. `/v1/ping` does
+ * not report it as of this SDK pin, so it is
  * absent here too (nothing to merge through) — `allowedActions` + `dataScope`
  * is not the complete picture for a credential that holds one. Once the
  * backend adds it to `PingResponse`, the `[key: string]: unknown` pass-through
@@ -54,8 +55,9 @@ const currentIdentity: ToolFactory = ({ log, apiKey, environment }) => ({
     "and (for scoped credentials) allowedActions plus dataScope — the credential's verb+ownership reach " +
     "as { userId, scopes[] }, where each scope is a `namespace:value` string (e.g. \"org:<uuid>\"). Note: " +
     "this does not yet include granted_capabilities (member-lifecycle / forensic-read / " +
-    "context-directory-read / delegate-mint) — a separate reach dimension a scope clause can carry as of " +
-    "API 0.40.0 that /v1/ping does not report yet, so allowedActions+dataScope may understate a " +
+    "context-directory-read / delegate-mint, as of API 0.40.0, joined by delegate-principal-stamp " +
+    "in 0.42.0) — a separate reach dimension a scope clause can carry that " +
+    "/v1/ping does not report yet, so allowedActions+dataScope may understate a " +
     "credential's true reach. Also reports mcpServerVersion (this server's own package version) and " +
     "sdkVersion (the bundled @vectros-ai/sdk version) so a caller can tell what build it's talking to. " +
     "Use this when the user asks 'what can you do here?', 'what tenant am I in?', or 'what version is " +

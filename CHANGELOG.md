@@ -3,6 +3,31 @@
 All notable changes to `@vectros-ai/mcp-server` are documented here.
 This project adheres to [Semantic Versioning](https://semver.org).
 
+## 0.16.1 — 2026-08-27
+
+### Fixed
+
+- **Claude Code setup docs: restart-to-load + Windows npx-resolution caveats.**
+  The "Configure manually (Claude Code)" section now covers three real
+  friction points found in dogfooding: a session already open when the
+  server is added needs a full quit + reopen (not just re-selecting the
+  tab); the `/mcp` panel shows the connector marketplace, not local stdio
+  servers, so it can't confirm the server loaded; and config resolves off
+  the git common root, so a linked worktree needs adding/opening from the
+  same project as its main repo. Also documents a Windows-specific trap: a
+  scoped-registry override for `@vectros-ai` in `.npmrc` can silently
+  resolve `npx -y @vectros-ai/mcp-server` to an unexpected internal build
+  that isn't guaranteed to run there — pin an explicit version if the
+  plain command fails to start.
+- **`current_identity`'s `granted_capabilities` note now lists all five named capabilities.**
+  The tool description and the `identity` resource both listed only four
+  (`member-lifecycle` / `forensic-read` / `context-directory-read` / `delegate-mint`); the
+  platform's fifth, `delegate-principal-stamp`, is now named alongside them.
+
+### Changed
+
+- Bundled `@vectros-ai/sdk` refreshed to the current release's staging build.
+
 ## 0.16.0 — 2026-08-27
 
 ### Added
