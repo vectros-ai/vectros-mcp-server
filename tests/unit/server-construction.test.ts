@@ -63,6 +63,8 @@ test('construction with default tools registers every shipped tool', () => {
       'version_history',
       // 0.41.0 SDK adoption
       'record_batch_get',
+      // 0.43.0 SDK adoption
+      'record_batch_write',
     ].sort(),
   );
 });

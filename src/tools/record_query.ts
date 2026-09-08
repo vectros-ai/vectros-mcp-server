@@ -1,7 +1,7 @@
 /**
  * record_query — read structured records, two modes (auto-detected by args):
  *
- *   field present → LOOKUP on a lookup-indexed field, one of:
+ *   field present → LOOKUP on a lookup-indexed field (always within ONE `type`), one of:
  *                     • equality:  `value` — also valid on a composite field (see
  *                       below), matching just the first named field
  *                     • composite: `values` — ONLY on a field naming a lookup the
@@ -9,7 +9,18 @@
  *                       below); `field` names them comma-joined, e.g. "status,area"
  *                     • range:     `from` + `to` — NOT valid on a composite field
  *                     • prefix:    `prefix` — NOT valid on a composite field
- *   no field      → LIST by type (+ optional ownership filters)
+ *   no field      → LIST, choosing one of `type` / `folderId` / `recent`
+ *                    (+ optional ownership filters on the first two)
+ *
+ * `folderId` and `recent` were exposed in 0.17.0. The API has carried both on
+ * `GET /v1/records` since long before this tool was written; the launch surface
+ * spec simply gave `folderId` to document_query and not to its record sibling,
+ * with no rationale recorded anywhere, and the omission was carried forward.
+ * API 0.43.0 turned that from cosmetic into load-bearing: folder_delete now
+ * refuses a folder still holding records, and the API's own guidance for clearing
+ * one names listing records by folder — a call this server could not make, so an
+ * agent could be told to empty a folder whose blocking records it had no way to
+ * enumerate.
  *
  * Composite lookups (SDK 0.38) are opt-in PER SCHEMA, not a general capability
  * this tool adds to any two fields: a schema's `lookupFields` entry must declare
@@ -65,8 +76,13 @@ const MCP_MAX_LIMIT = 100;
 const inputSchema = {
   type: z
     .string()
-    .min(1, 'type (record type) is required')
-    .describe('Record type / schema name (e.g. "patient", "clinical_note").'),
+    .min(1, 'type must be non-empty when supplied')
+    .optional()
+    .describe(
+      'Record type / schema name (e.g. "patient", "clinical_note"). REQUIRED for a lookup (`field`). ' +
+        'In list mode it is one of three ways to choose what to list — supply `type`, `folderId`, or ' +
+        '`recent` — and it may be combined with `folderId` to list one type within one folder.',
+    ),
   // Lookup-mode args — provide `field` plus EXACTLY ONE of: value | values | from+to | prefix.
   field: z
     .string()
@@ -138,6 +154,25 @@ const inputSchema = {
         'prefix lookup to get the most-recent / highest values first (e.g. latest-N). Ignored in list mode.',
     ),
   // List-mode args:
+  folderId: z
+    .string()
+    .optional()
+    .describe(
+      'List mode: list the records filed in this folder (a Vectros folder UUID), regardless of type — ' +
+        'the record-side counterpart of document_query\'s folderId. Combine with `type` to list a single ' +
+        'type within the folder. Use this to see what a folder holds before deleting it: folder_delete ' +
+        'refuses a folder that still contains records.',
+    ),
+  recent: z
+    .boolean()
+    .optional()
+    .describe(
+      'List mode: return the account-wide recently-updated feed across ALL record types, newest first — ' +
+        'a type-agnostic activity view, and the one way to read records without naming a type. Standalone: ' +
+        'it cannot be combined with `type`, `folderId`, `userId` or `scope` (the API ignores them here, so ' +
+        'this tool rejects the combination rather than silently returning something else). You still see ' +
+        'only the record types your credential may read.',
+    ),
   userId: z.string().optional().describe('List mode: scope to records owned by this user.'),
   scope: z
     .string()
@@ -176,7 +211,11 @@ const recordQuery: ToolFactory = ({ client, log }) => ({
     'a fieldNames entry, then pass those field names comma-joined as `field`; `from`/`to`/`prefix` are not ' +
     'valid there. Works on sensitive fields too. Optionally narrow an exact match to a window with ' +
     '`sortFrom`/`sortTo`.\n' +
-    '  • List by type: omit `field`; optionally filter by `userId` or `scope` (`namespace:value`).\n' +
+    '  • List: omit `field`, then choose ONE of `type` (every record of a type), `folderId` (every record ' +
+    'filed in a folder, any type — combine with `type` for one type within one folder), or `recent` (the ' +
+    'account-wide recently-updated feed across every type, newest first — the only way to read records ' +
+    'without naming a type, and standalone: no other filter applies to it). `userId`/`scope` further narrow ' +
+    'the type and folder modes.\n' +
     'Returns a `{ data, nextCursor }` page: `data` holds up to `limit` records (default 3, max 100 — ' +
     'raise it in one call when you can accept the payload), and a non-null `nextCursor` means more remain — ' +
     'pass it back as `startFrom` to page. A composite lookup given fewer than its full field count ' +
@@ -185,7 +224,9 @@ const recordQuery: ToolFactory = ({ client, log }) => ({
   inputSchema,
   handler: async (args): Promise<ToolResult> => {
     const limit = (args.limit as number | undefined) ?? MCP_DEFAULT_LIMIT;
-    const type = args.type as string;
+    const type = args.type as string | undefined;
+    const folderId = args.folderId as string | undefined;
+    const recent = args.recent as boolean | undefined;
     const field = args.field as string | undefined;
     const value = args.value as string | undefined;
     const values = args.values as string[] | undefined;
@@ -215,6 +256,61 @@ const recordQuery: ToolFactory = ({ client, log }) => ({
             "mode runs and silently ignores them. Pass 'field' to run a lookup, or drop these to list by type.",
         ),
       );
+    }
+    // Mode-selection guards. `type` is no longer unconditionally required — list mode
+    // chooses between `type`, `folderId` and `recent` — so each combination that the API
+    // would answer with something OTHER than what the agent asked for is rejected here,
+    // matching the lookup-args-require-field guard above. Silently returning a different
+    // result set is the failure this tool consistently refuses to allow.
+    // The mirror of the lookup-args guard below: a lookup ignores the list-mode selectors, so
+    // accepting them silently would run a lookup while the agent believes it scoped to a folder
+    // or asked for the recent feed — the same silent-wrong-result failure that guard refuses.
+    if (field && (folderId !== undefined || recent !== undefined)) {
+      return toolError(
+        'record_query',
+        new Error(
+          "'folderId' and 'recent' are list-mode selectors and do not apply to a lookup ('field') — a " +
+            'lookup runs within one `type` and would ignore them. Drop `field` to list, or drop these to look up.',
+        ),
+      );
+    }
+    if (field && !type) {
+      return toolError(
+        'record_query',
+        new Error(
+          "a lookup ('field') is always within one record type — pass 'type'. To read across types, " +
+            "use list mode with 'folderId' or 'recent'.",
+        ),
+      );
+    }
+    if (!field) {
+      if (recent && (type !== undefined || folderId !== undefined)) {
+        return toolError(
+          'record_query',
+          new Error(
+            "'recent' is the account-wide feed across all types and cannot be narrowed — it is mutually " +
+              "exclusive with 'type' and 'folderId'. Drop 'recent' to list by type/folder.",
+          ),
+        );
+      }
+      if (recent && (args.userId !== undefined || args.scope !== undefined)) {
+        return toolError(
+          'record_query',
+          new Error(
+            "'recent' ignores the owner filters — 'userId'/'scope' would be silently dropped. List by " +
+              "'type' or 'folderId' to filter by owner.",
+          ),
+        );
+      }
+      if (!recent && type === undefined && folderId === undefined) {
+        return toolError(
+          'record_query',
+          new Error(
+            "list mode needs one of 'type' (records of a type), 'folderId' (records in a folder, any " +
+              "type), or 'recent' (the account-wide recently-updated feed). Add 'field' to run a lookup.",
+          ),
+        );
+      }
     }
     try {
       let page: Page<Vectros.RecordResponse>;
@@ -299,7 +395,8 @@ const recordQuery: ToolFactory = ({ client, log }) => ({
         // POST-body lookup: sensitive-safe (value never in the URL), all modes in one path.
         // Forward `normalizedField`, not the raw `field` — see the comment above.
         page = await client.records.lookupRecordsByBody({
-          type,
+          // Non-null: the `field && !type` guard above returns before reaching lookup mode.
+          type: type!,
           field: normalizedField,
           value,
           values,
@@ -317,16 +414,28 @@ const recordQuery: ToolFactory = ({ client, log }) => ({
           'record_query lookup ok',
         );
       } else {
-        // List mode — filter by ownership + type.
+        // List mode — by type, by folder, or the account-wide recent feed.
+        // `recent` is a STRING query param on the wire ('true'), not a boolean; send the
+        // key only when the agent asked for it so an unset value never reaches the API
+        // as the literal 'false' (which the endpoint would read as mode-selecting).
         page = await client.records.listRecords({
           type,
+          folderId,
+          ...(recent ? { recent: 'true' } : {}),
           userId: args.userId as string | undefined,
           scope: args.scope as string | undefined,
           startFrom,
           limit,
         });
         log.debug(
-          { tool: 'record_query', mode: 'list', type, limit, returned: pageItems(page).length },
+          {
+            tool: 'record_query',
+            mode: recent ? 'list:recent' : folderId ? 'list:folder' : 'list:type',
+            type,
+            folderId,
+            limit,
+            returned: pageItems(page).length,
+          },
           'record_query list ok',
         );
       }

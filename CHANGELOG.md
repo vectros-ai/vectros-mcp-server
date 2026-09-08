@@ -3,6 +3,142 @@
 All notable changes to `@vectros-ai/mcp-server` are documented here.
 This project adheres to [Semantic Versioning](https://semver.org).
 
+## 0.17.0 — 2026-09-07
+
+### Added
+
+- **`record_batch_write`** — create or upsert up to 50 structured records in one call,
+  wrapping `POST /v1/records/batch` (API 0.43.0: previously a `501` stub, now live).
+  Use it instead of N `record_create` round-trips when you hold several records.
+  Items may mix types, and each one goes through the same schema validation,
+  `externalId` idempotency, unique-field enforcement and `records:c:<type>` scope
+  check as a single create, applied per item against that item's own type — a batch
+  is not a way to write a type your credential could not write one at a time.
+  `atomicity: "all_or_nothing"` commits every item in one transaction and writes
+  nothing at all if any item fails, which is a better failure shape for an agent than
+  a loop of creates that half-succeeds; the default `best_effort` writes each item
+  independently. The item vocabulary deliberately mirrors `record_create` (`type` +
+  `fields`), so nothing new has to be learned to use it.
+
+  **The call reports success whenever the batch was *processed* — including when
+  every item failed.** That is the endpoint's own contract, so the tool does not
+  fake an error result; read the per-item `results` (matched to what you sent by
+  `index`) and the `succeeded`/`failed` counts. Per-item `status` carries two values
+  beyond the ordinary outcomes, and they call for different remedies:
+  `forbidden` (your credential lacked the scope or ownership that item needed — fix
+  the credential, not the item) and `not_committed` (this item was fine, but an
+  `all_or_nothing` batch was aborted by a different one).
+
+- **`record_query` can list by `folderId`, and serve the account-wide `recent` feed.**
+  Two list-mode selectors the API has carried on `GET /v1/records` for many releases
+  but this tool never exposed: `folderId` lists every record filed in a folder
+  regardless of type (combine with `type` for one type within one folder), and
+  `recent: true` returns the recently-updated feed across all types — the only way to
+  read records without naming a type. `record_create` has always accepted `folderId`,
+  so until now a record could be filed into a folder and never listed back out of it.
+
+  This matters more from 0.43.0 on, because `folder_delete` now refuses a folder that
+  still holds records and the supported way to find them is exactly this call.
+  `type` is consequently optional now: a lookup (`field`) still requires it, a list
+  with no selector at all is refused, and `recent` is refused alongside
+  `type`/`folderId`/`userId`/`scope` rather than silently ignoring them the way the
+  API does.
+
+- **`scopeFilters` on `hybrid_search` and `rag_ask`** — narrow a search or a RAG
+  retrieval by more than one ownership dimension at once, e.g.
+  `["org:<id>", "client:<id>"]` for one specific client within one specific org.
+  Something `scope` alone could not express, for a credential whose access spans
+  several dimensions. Mutually exclusive with `scope`; passing both is refused
+  locally with a message naming both fields, rather than spending a round trip on
+  the API's own rejection.
+
+### Changed
+
+- **`folder_delete` now states its emptiness precondition** — the folder must contain
+  no documents, **no records**, and no sub-folders, and the description says how to clear
+  each: a document can be moved out or deleted, a record can only be deleted (nothing on
+  this surface moves one), and a sub-folder cannot be re-parented, so nesting must be
+  cleared innermost-first. The description previously named only protected folders, so
+  the most common way this call fails read as impossible.
+
+  **API 0.43.0 widened the refusal, and it lands harder on this server than on most
+  callers.** The old guard saw sub-folders and *file-backed* documents only — it was blind
+  to *text-ingested* documents and to records, and a delete that hit one of those returned
+  success while orphaning the contents behind a folder id that no longer resolved.
+  Text-inline ingest is `document_ingest`'s default path, so folders this server filled are
+  precisely the ones whose deletes used to succeed and now do not.
+
+  One consequence worth planning for: the emptiness check counts **everything** in the
+  folder, including items the calling credential cannot read. A scoped credential can be
+  refused by content it has no way to enumerate, so a refusal that contradicts your own
+  listing is expected rather than a bug.
+- **`rag_ask`'s `truncationWarning` now carries `truncatedCount` and `noContentCount`**,
+  and its `reason` can be `no_groundable_content` or `context_window_budget_and_no_content`
+  as well as `context_window_budget`. Results can be dropped before the prompt is built
+  for two independent reasons — not fitting the context window, or having no groundable
+  text at all — and these separate them. Inherited from the API with no code change here;
+  noted because it is new data an agent sees.
+- **`hybrid_search`'s ARCHIVED note now covers records, and stops claiming an absolute.**
+  It said ARCHIVED *documents* never appear in results, which read as an asymmetry implying
+  archived records still match — they do not, and have refused to index since API 0.35.
+  API 0.43.0 additionally fixed two document write paths that could silently re-index an
+  already-archived document. But it deliberately does **not** sweep items already stranded
+  in that state: they stay searchable until written to again. So "never appear" was a false
+  absolute, and the description now names the repair — re-send `status: "ARCHIVED"` on the
+  item — instead of implying the case cannot arise.
+- **A search hit's returned `createdAt` is documented as the INDEX timestamp.** It is the moment
+  the item entered the search index — the same moment it was created in the common case, but later
+  for anything re-indexed since — so it should not be reported to a user as the creation time; fetch
+  the item with `document_get`/`record_get` for that. The `createdAfter`/`createdBefore` FILTERS are a
+  separate thing and are unchanged: they filter on the item's true creation time, which does not move
+  when it is re-indexed, with a bounded allowance that lets an item matched on its FIRST index be
+  checked against its index time instead (clock skew between creating and indexing).
+- **`folder_delete` no longer implies a record cannot be moved.** It said a record must be deleted
+  because it cannot be re-filed. The API supports re-filing one (`folderId` is patchable); it is
+  *this server* that does not expose it — `record_update` has no `folderId` argument. As written, an
+  agent clearing a folder could have deleted partner data where a move was available, then reported
+  that a move was impossible. It now names the gap as this server's and says to move the record
+  through the API/SDK rather than deleting it here.
+- **`record_batch_write` no longer claims duplicate `externalId`s within one batch are refused.**
+  That holds under `atomicity: "all_or_nothing"` only. Under the default `best_effort` each item is
+  written independently, so a second item carrying the same `externalId` matches what the first just
+  wrote and reports `updated` — a duplicated key silently collapses two rows into one, counted as a
+  success. Both modes are now described.
+- **`record_create` / `record_batch_write`: `scopes` is bounded by `data_scope`, not by identity.**
+  Both said the values "must come from the credential's own identity". The platform states the
+  opposite: identity supplies the DEFAULT when you state none and does not limit which value you may
+  state; each entry must fall inside the `data_scope` of a granting clause. The old wording would
+  stop an agent setting a scope it was entitled to set.
+- **`record_query` rejects `folderId`/`recent` on a lookup** instead of ignoring them, matching the
+  existing guard for lookup arguments passed without `field`.
+- **Bundled `@vectros-ai/sdk` repinned to the 0.43.0 line.**
+
+### Notes
+
+- **A root `sk_*` key can no longer file into a non-`default` app context.** As of API
+  0.43.0, a `folderId` / `parentFolderId` — or a document's `schemaId` — belonging to
+  another context is refused with a uniform `400`, on `document_ingest`,
+  `document_update`, `record_create`, `record_update` and `folder_create`. Those calls
+  previously succeeded, but never coherently: a root key's writes are stamped
+  `default`, so the row landed in `default` while its folder or schema lived elsewhere.
+  Existing rows are unaffected. Use a scoped key bound to the target context — the
+  credential this server recommends anyway. See README § Recommended credential.
+- **A `filters` clause on `status` means something different for records now.** Records
+  no longer publish their lifecycle `status` into the search index (API 0.43.0), so on
+  `hybrid_search` / `rag_ask` a `status` filter matches a schema's own `status` field
+  where one is declared, and nothing where none is — it no longer collides with the
+  platform's lifecycle value. Record schemas can now use `status` as a filterable field
+  of their own.
+- **0.43.0 capabilities this server deliberately does not expose:** stored scripts and
+  synchronous script execution, trigger rules, trigger-failure history, and usage
+  reporting. The reasoning is in README § What this server deliberately doesn't expose
+  — briefly: authoring stored code is a design-time act rather than a data-plane one;
+  declaring a trigger rule grants live authority; trigger-failure and usage reporting
+  are operational questions for a person, not mid-task tool calls; and synchronous
+  script execution has a failure surface (an undetermined-outcome run, and an
+  idempotency key a tool call has no natural identity for) that needs a deliberate
+  design rather than a thin wrapper.
+
 ## 0.16.1 — 2026-08-27
 
 ### Fixed

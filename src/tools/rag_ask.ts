@@ -67,7 +67,19 @@ const inputSchema = {
         .describe(
           'Restrict retrieval to content carrying this scope value, in `namespace:value` form ' +
             '(e.g. "org:<uuid>", "client:<uuid>", "group:eng-team"). `org` and `client` are reserved ' +
-            'namespace names, registered like any other; others are namespaces you registered yourself.',
+            'namespace names, registered like any other; others are namespaces you registered yourself. ' +
+            'Mutually exclusive with `scopeFilters` — use this for ONE dimension.',
+        ),
+      scopeFilters: z
+        .array(z.string())
+        .min(1, 'scopeFilters must name at least one dimension when supplied')
+        .optional()
+        .describe(
+          'Restrict retrieval to content matching ALL of these scope values — one per namespace — for a ' +
+            'credential whose access spans more than one ownership dimension. e.g. ["org:<uuid>", ' +
+            '"client:<uuid>"] grounds the answer on one specific client WITHIN one specific org, which ' +
+            '`scope` alone cannot express. Naming the same namespace twice is rejected. Mutually exclusive ' +
+            'with `scope`.',
         ),
       folderId: z.string().optional().describe('Restrict retrieval to this exact folder.'),
       rootFolderId: z.string().optional().describe('Restrict retrieval to this folder and all its descendants.'),
@@ -83,8 +95,18 @@ const inputSchema = {
           'Field-level metadata filters (AND-combined). Value = scalar (equality), array (OR-set), or operator ' +
             'map ($eq/$ne/$gt/$gte/$lt/$lte, $in/$nin). e.g. {"status":"open"}.',
         ),
-      createdAfter: z.string().optional().describe('Restrict to content created at/after this ISO 8601 UTC timestamp.'),
-      createdBefore: z.string().optional().describe('Restrict to content created at/before this ISO 8601 UTC timestamp.'),
+      createdAfter: z
+        .string()
+        .optional()
+        .describe(
+          "Restrict retrieval to content CREATED at/after this ISO 8601 UTC timestamp — the item's own " +
+            'creation time, which does not move when it is re-indexed. An item matched on its FIRST index ' +
+            'may be checked against its index time instead, a bounded clock-skew allowance.',
+        ),
+      createdBefore: z
+        .string()
+        .optional()
+        .describe('Same creation-time basis as createdAfter, bounding at/before this ISO 8601 UTC value.'),
       requireComplete: z
         .boolean()
         .optional()
@@ -107,19 +129,33 @@ const ragAsk: ToolFactory = ({ client, log }) => ({
   description:
     'Ask a question grounded against your tenant\'s indexed content. ' +
     'Vectros performs a hybrid search, injects the top-K passages into the prompt, ' +
-    'and streams a model answer back. Scope retrieval with `search` (ownership, folder, type, metadata filters, ' +
-    'date window) to ground on a subset — e.g. one patient or one folder — and steer generation with ' +
+    'and streams a model answer back. Scope retrieval with `search` (ownership — `scope` for one ownership ' +
+    'dimension or `scopeFilters` for several at once, e.g. one client within one org — folder, type, metadata ' +
+    'filters, date window) to ground on a subset — e.g. one patient or one folder — and steer generation with ' +
     '`instructions` / `temperature`. The full answer is returned as a single response; ' +
     'progress notifications keep the call alive during the 30-45s generation window. ' +
     'Inference runs in-perimeter against AWS Bedrock — PHI never leaves the BAA boundary.',
   inputSchema,
   handler: async (args, extra): Promise<ToolResult> => {
+    // Same local rejection as hybrid_search: the pair is mutually exclusive server-side, and
+    // answering it here costs the agent no round trip and names both fields.
+    const rawSearch = (args.search ?? {}) as Record<string, unknown>;
+    if (rawSearch.scope !== undefined && rawSearch.scopeFilters !== undefined) {
+      return toolError(
+        'rag_ask',
+        new Error(
+          "search.scope and search.scopeFilters are mutually exclusive — pass 'scope' for a single " +
+            "ownership dimension, or 'scopeFilters' for more than one, not both.",
+        ),
+      );
+    }
     try {
       const searchArg = (args.search ?? {}) as {
         mode?: 'HYBRID' | 'TEXT' | 'SEMANTIC';
         limit?: number;
         userId?: string;
         scope?: string;
+        scopeFilters?: string[];
         folderId?: string;
         rootFolderId?: string;
         typeName?: string;
@@ -134,6 +170,7 @@ const ragAsk: ToolFactory = ({ client, log }) => ({
         limit: searchArg.limit ?? SEARCH_MCP_DEFAULT_LIMIT,
         userId: searchArg.userId,
         scope: searchArg.scope,
+        scopeFilters: searchArg.scopeFilters,
         folderId: searchArg.folderId,
         rootFolderId: searchArg.rootFolderId,
         typeName: searchArg.typeName,

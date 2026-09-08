@@ -18,6 +18,7 @@ import recordBatchGet from '../../src/tools/record_batch_get.js';
 import recordCreate from '../../src/tools/record_create.js';
 import recordUpdate from '../../src/tools/record_update.js';
 import recordDelete from '../../src/tools/record_delete.js';
+import recordBatchWrite from '../../src/tools/record_batch_write.js';
 
 const log = pino({ level: 'silent' });
 
@@ -415,4 +416,161 @@ test('record_delete surfaces a scope error (key lacks records:d)', async () => {
   const r = await recordDelete({ client, log }).handler({ id: 'rec_1' }, {});
   assert.equal(r.isError, true);
   assert.match(r.content[0].text, /403|scope/i);
+});
+
+// ============================================================================
+// record_batch_write (API 0.43.0 — POST /v1/records/batch, previously a 501 stub)
+// ============================================================================
+
+test('record_batch_write maps the agent vocabulary (type/fields) onto the wire shape', async () => {
+  const s = spy();
+  const client = {
+    records: {
+      batchWriteRecords: async (args: unknown) => {
+        s.record('batchWriteRecords', args);
+        return {
+          results: [
+            { index: 0, id: 'rec_a', status: 'created' },
+            { index: 1, id: 'rec_b', status: 'created' },
+          ],
+          succeeded: 2,
+          failed: 0,
+        };
+      },
+    },
+  } as never;
+  const r = await recordBatchWrite({ client, log }).handler(
+    {
+      items: [
+        { type: 'task', fields: { title: 'one' }, externalId: 'ext-1' },
+        { type: 'note', fields: { body: 'two' }, indexMode: 'NONE', scopes: [] },
+      ],
+    },
+    {},
+  );
+  assert.ok(!r.isError);
+  const sent = s.calls[0].args as { items: Array<Record<string, unknown>> };
+  // The tool speaks `type`/`fields` to the agent (mirroring record_create) and
+  // `typeName`/`payload` to the API — a rename bug here is invisible to a schema test.
+  assert.equal(sent.items[0].typeName, 'task');
+  assert.deepEqual(sent.items[0].payload, { title: 'one' });
+  assert.equal(sent.items[0].externalId, 'ext-1');
+  assert.equal(sent.items[1].typeName, 'note');
+  assert.equal(sent.items[1].indexMode, 'NONE');
+  assert.deepEqual(sent.items[1].scopes, [], 'an empty scopes array must survive as [] (a PRIVATE record), not be dropped');
+  // No schemaId pre-fetch — same single-round-trip contract as record_create.
+  assert.equal(s.calls.length, 1);
+  assert.equal(sent.items[0].schemaId, undefined);
+});
+
+test('record_batch_write passes atomicity / upsert / allowClear through', async () => {
+  const s = spy();
+  const client = {
+    records: {
+      batchWriteRecords: async (args: unknown) => {
+        s.record('batchWriteRecords', args);
+        return { results: [], succeeded: 0, failed: 0 };
+      },
+    },
+  } as never;
+  await recordBatchWrite({ client, log }).handler(
+    {
+      items: [{ type: 'task', fields: { title: 'x' } }],
+      atomicity: 'all_or_nothing',
+      upsert: true,
+      allowClear: true,
+    },
+    {},
+  );
+  const sent = s.calls[0].args as Record<string, unknown>;
+  assert.equal(sent.atomicity, 'all_or_nothing');
+  assert.equal(sent.upsert, true);
+  assert.equal(sent.allowClear, true);
+});
+
+test('record_batch_write defaults atomicity to the API default rather than choosing one', async () => {
+  // Deliberate: the tool does NOT silently upgrade an omitted atomicity to
+  // all_or_nothing. An agent told "same rules as POST /v1/records" must get the
+  // API's own default (best_effort), so omission reaches the wire as absent.
+  const s = spy();
+  const client = {
+    records: {
+      batchWriteRecords: async (args: unknown) => {
+        s.record('batchWriteRecords', args);
+        return { results: [], succeeded: 0, failed: 0 };
+      },
+    },
+  } as never;
+  await recordBatchWrite({ client, log }).handler({ items: [{ type: 't', fields: {} }] }, {});
+  const sent = s.calls[0].args as Record<string, unknown>;
+  assert.equal(sent.atomicity, undefined);
+});
+
+test('record_batch_write reports a wholly-failed batch as a SUCCESSFUL call carrying per-item failures', async () => {
+  // The endpoint returns 200 whenever the batch was processed, including when every
+  // item failed. The MCP call therefore is not isError — the per-item results are the
+  // outcome. An agent that branched on isError alone would read this as "all written",
+  // which is exactly why the description says to read `results`.
+  const client = {
+    records: {
+      batchWriteRecords: async () => ({
+        results: [
+          { index: 0, status: 'forbidden', error: 'records:c:secret not granted' },
+          { index: 1, status: 'invalid', error: 'title is required' },
+        ],
+        succeeded: 0,
+        failed: 2,
+      }),
+    },
+  } as never;
+  const r = await recordBatchWrite({ client, log }).handler(
+    { items: [{ type: 'secret', fields: {} }, { type: 'task', fields: {} }] },
+    {},
+  );
+  assert.ok(!r.isError, 'a processed batch is a successful CALL even when every item failed');
+  const body = parsedText(r) as { succeeded: number; failed: number; results: Array<Record<string, unknown>> };
+  assert.equal(body.succeeded, 0);
+  assert.equal(body.failed, 2);
+  // The 0.43.0-new statuses reach the agent verbatim — no remapping onto the old set.
+  assert.equal(body.results[0].status, 'forbidden');
+  assert.equal(body.results[0].index, 0, 'index is how an agent matches a result to the item it sent');
+});
+
+test('record_batch_write surfaces a transport-level failure as isError', async () => {
+  const client = {
+    records: {
+      batchWriteRecords: async () => {
+        const e = new Error('Insufficient scope: records:c required') as Error & { statusCode: number };
+        e.statusCode = 403;
+        throw e;
+      },
+    },
+  } as never;
+  const r = await recordBatchWrite({ client, log }).handler({ items: [{ type: 't', fields: {} }] }, {});
+  assert.equal(r.isError, true);
+  assert.match(r.content[0].text, /403|scope/i);
+});
+
+test('record_batch_write disables SDK auto-retry — a replay would duplicate committed items', async () => {
+  // The SDK retries 408/429/5xx by replaying the whole request body, and a best_effort
+  // batch commits items independently, so an account-level fault raised partway through
+  // arrives AFTER earlier items are committed (the platform lets those propagate rather
+  // than reporting them per item). A replay re-writes everything that already landed;
+  // only items carrying an externalId are protected. This must be an explicit 0.
+  const seen: Array<{ body: unknown; opts: unknown }> = [];
+  const client = {
+    records: {
+      batchWriteRecords: async (body: unknown, opts: unknown) => {
+        seen.push({ body, opts });
+        return { results: [], succeeded: 0, failed: 0 };
+      },
+    },
+  } as never;
+  await recordBatchWrite({ client, log }).handler({ items: [{ type: 't', fields: {} }] }, {});
+  assert.equal(seen.length, 1);
+  assert.deepEqual(
+    seen[0].opts,
+    { maxRetries: 0 },
+    'the batch write must opt out of transport-level retries explicitly',
+  );
 });

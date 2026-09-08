@@ -12,6 +12,7 @@ import recordQuery from './record_query.js';
 import recordGet from './record_get.js';
 import recordBatchGet from './record_batch_get.js';
 import recordCreate from './record_create.js';
+import recordBatchWrite from './record_batch_write.js';
 import recordUpdate from './record_update.js';
 import recordDelete from './record_delete.js';
 import ragAsk from './rag_ask.js';
@@ -36,6 +37,7 @@ export const ALL_TOOL_FACTORIES: Record<string, ToolFactory> = {
   record_get: recordGet,
   record_batch_get: recordBatchGet,
   record_create: recordCreate,
+  record_batch_write: recordBatchWrite,
   record_update: recordUpdate,
   record_delete: recordDelete,
   rag_ask: ragAsk,

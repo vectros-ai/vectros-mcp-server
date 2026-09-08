@@ -119,17 +119,38 @@ const inputSchema = {
     .describe(
       'Restrict to content carrying this scope value, in `namespace:value` form (e.g. "org:<uuid>", ' +
         '"client:<uuid>", "group:eng-team"). `org` and `client` are reserved namespace names, ' +
-        'registered like any other; others are namespaces you registered yourself.',
+        'registered like any other; others are namespaces you registered yourself. ' +
+        'Mutually exclusive with `scopeFilters` — use this for ONE dimension.',
+    ),
+  scopeFilters: z
+    .array(z.string())
+    .min(1, 'scopeFilters must name at least one dimension when supplied')
+    .optional()
+    .describe(
+      'Restrict to content matching ALL of these scope values — one per namespace — for a credential ' +
+        'whose access spans more than one ownership dimension. e.g. ["org:<uuid>", "client:<uuid>"] narrows ' +
+        'to one specific client WITHIN one specific org, which `scope` alone cannot express. Same ' +
+        '`namespace:value` form as `scope`; naming the same namespace twice is rejected. Mutually ' +
+        'exclusive with `scope` — use `scope` for a single dimension.',
     ),
   // Date window.
   createdAfter: z
     .string()
     .optional()
-    .describe('Restrict to content created at/after this ISO 8601 UTC timestamp.'),
+    .describe(
+      "Restrict to content CREATED at/after this ISO 8601 UTC timestamp — the item's own creation time, " +
+        'which does NOT move when the item is later re-indexed. One bounded exception: an item matched on ' +
+        'its FIRST index may be checked against the moment it was indexed instead, a small allowance for ' +
+        'clock skew between creating and indexing it. Do not confuse this with a hit\'s returned ' +
+        '`createdAt`, which is the index timestamp and can be later — see the tool description.',
+    ),
   createdBefore: z
     .string()
     .optional()
-    .describe('Restrict to content created at/before this ISO 8601 UTC timestamp.'),
+    .describe(
+      'Restrict to content CREATED at/before this ISO 8601 UTC timestamp — same creation-time basis, and ' +
+        'the same first-index allowance, as createdAfter.',
+    ),
   // Relevance tuning.
   minSimilarity: z
     .number()
@@ -171,11 +192,20 @@ const hybridSearch: ToolFactory = ({ client, log }) => ({
     'Search your tenant\'s indexed content (documents + structured records) using hybrid BM25 + dense ranking. ' +
     'Returns up to `limit` results (default 3, max 50 — raise it in one call when you can accept the larger result) ' +
     'with citations and surrounding context for grounding follow-up reasoning. ' +
-    'Narrow with contentTypes/typeName/filters, ownership (userId/scope), folder scope, a created date window, ' +
+    'Narrow with contentTypes/typeName/filters, ownership (userId, and scope for ONE ownership dimension or ' +
+    'scopeFilters for several at once — e.g. one client within one org), folder scope, a created date window, ' +
     'keyword precision (textMode OR/AND/PHRASE), relevance floors (minSimilarity/minTextRelevance), uniqueDocuments, ' +
     'and requireComplete (fail closed on a degraded backend). Tenant-isolated; the caller\'s scoped key fully ' +
-    'constrains which content is visible. ARCHIVED (soft-retracted) documents never appear in results — fetch ' +
-    'them by id via document_get, or restore them via document_update. To stay within the agent context window each hit returns its matched ' +
+    'constrains which content is visible. ARCHIVED (soft-retracted) documents AND records are excluded from ' +
+    'results — fetch them by id via document_get/record_get, or restore them by setting status back to ACTIVE. ' +
+    'One exception to know: an item archived before the platform enforced this can still be returned here until ' +
+    'it is next written to, and nothing sweeps for those — if an archived item does come back as a hit, re-send ' +
+    'status ARCHIVED on it (document_update / record_update) to re-assert the retraction. ' +
+    "A hit's `createdAt` is when the item entered the search INDEX, which is the moment it was created in " +
+    'the common case but is later for anything re-indexed since — so do not report it to a user as the ' +
+    'creation time; fetch the item with document_get/record_get and read its own createdAt for that. (The ' +
+    'createdAfter/createdBefore filters are a separate thing and do filter on true creation time.) ' +
+    'To stay within the agent context window each hit returns its matched ' +
     'chunkText + a short snippet by default; set includeContext:true for the broader surrounding passage. If the ' +
     'whole result would be too large it is truncated to the top hits (truncated:true). totalResults is the full ' +
     'matching pool and hasMore:true means results remain past this page — raise limit or advance offset to fetch them. ' +
@@ -186,6 +216,18 @@ const hybridSearch: ToolFactory = ({ client, log }) => ({
   handler: async (args): Promise<ToolResult> => {
     const limit = (args.limit as number | undefined) ?? MCP_DEFAULT_LIMIT;
     const mode = (args.mode as 'HYBRID' | 'TEXT' | 'SEMANTIC' | undefined) ?? 'HYBRID';
+    // Reject the mutually-exclusive pair locally rather than spending a round trip on the API's
+    // 400: the agent gets the same answer, faster, in a message that names both fields (same
+    // rationale as lookup_principal's contextId/kind:user rejection).
+    if (args.scope !== undefined && args.scopeFilters !== undefined) {
+      return toolError(
+        'hybrid_search',
+        new Error(
+          "'scope' and 'scopeFilters' are mutually exclusive — pass 'scope' for a single ownership " +
+            "dimension, or 'scopeFilters' for more than one, not both.",
+        ),
+      );
+    }
     try {
       const result = await client.search.content({
         query: args.query as string,
@@ -200,6 +242,7 @@ const hybridSearch: ToolFactory = ({ client, log }) => ({
         filters: args.filters as Record<string, Vectros.FilterValue> | undefined,
         userId: args.userId as string | undefined,
         scope: args.scope as string | undefined,
+        scopeFilters: args.scopeFilters as string[] | undefined,
         createdAfter: args.createdAfter as string | undefined,
         createdBefore: args.createdBefore as string | undefined,
         minSimilarity: args.minSimilarity as number | undefined,

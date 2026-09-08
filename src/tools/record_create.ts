@@ -59,7 +59,9 @@ const inputSchema = {
       'Scope ownership as `namespace:value` entries, at most 2 (e.g. ["org:<uuid>", "group:eng-team"]). ' +
         '`org` and `client` are reserved namespace names, registered like any other; others are ' +
         'namespaces you registered yourself. This is the ' +
-        'record\'s COMPLETE scope declaration and values must come from the credential\'s own identity. ' +
+        'record\'s COMPLETE scope declaration, and each entry must fall inside the `data_scope` of a ' +
+        'single clause of your credential that also grants this write — your identity supplies the ' +
+        'DEFAULT when you state none, it does not limit which value you may state. ' +
         'An empty array `[]` creates a PRIVATE record owned by the calling user alone. Omit to stamp the ' +
         'credential\'s full identity — the default.',
     ),

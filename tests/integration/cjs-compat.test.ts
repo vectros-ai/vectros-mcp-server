@@ -43,7 +43,7 @@ test('dist/index.js loads via CommonJS require()', () => {
   assert.equal(out.hasToolNames, true, 'TOOL_NAMES array exported');
   // Tool count grows as v0.2 tools land — keep in lockstep with
   // src/tools/index.ts ALL_TOOL_FACTORIES.
-  assert.equal(out.toolCount, 22, 'TOOL_NAMES = v0.2 eight + records-I/O tier (4) + tier-2 document_query + tier-3 document_update/delete + folder CRUD (6) + parity sweep (lookup_principal, version_history) + 0.41.0 record_batch_get');
+  assert.equal(out.toolCount, 23, 'TOOL_NAMES = v0.2 eight + records-I/O tier (4) + tier-2 document_query + tier-3 document_update/delete + folder CRUD (6) + parity sweep (lookup_principal, version_history) + 0.41.0 record_batch_get + 0.43.0 record_batch_write');
   assert.equal(out.hasResourceNames, true, 'RESOURCE_NAMES array exported (v0.2+)');
   assert.equal(out.resourceCount, 2, 'RESOURCE_NAMES has schemas + identity');
   assert.equal(out.hasInvalidApiKeyError, true, 'InvalidApiKeyError class exported');
@@ -88,6 +88,7 @@ test('dist/index.js exposes correct TOOL_NAMES via CJS', () => {
       'version_history',
       // 0.41.0 SDK adoption
       'record_batch_get',
+      'record_batch_write',
     ].sort(),
   );
 });

@@ -79,6 +79,7 @@ test('spawn stdio server + handshake + list_tools', async () => {
         'version_history',
         // 0.41.0 SDK adoption
         'record_batch_get',
+        'record_batch_write',
       ].sort(),
     );
 
@@ -125,12 +126,23 @@ test('tools/call dispatch fails closed: unknown tool + invalid args (no SDK call
     assert.equal(unknown.isError, true, 'unknown tool → isError');
     assert.match(JSON.stringify(unknown.content), /No such tool/);
 
-    // record_query requires a non-empty `type`; `{}` fails zod BEFORE any SDK call.
-    // The 'Invalid arguments' message (not a network error against the fake key)
-    // proves the request→validate→reject path short-circuits the dispatch.
-    const badArgs = await client.callTool({ name: 'record_query', arguments: {} });
+    // An out-of-range `limit` fails zod BEFORE any SDK call. The 'Invalid arguments'
+    // message (not a network error against the fake key) proves the
+    // request→validate→reject path short-circuits the dispatch.
+    // (This used to pass `{}`, which stopped being schema-invalid in 0.17.0 when
+    // `type` became optional so list mode could select by `folderId`/`recent`. The
+    // branch under test is zod rejection, so it needs an argument zod still rejects.)
+    const badArgs = await client.callTool({ name: 'record_query', arguments: { type: 'control', limit: 999 } });
     assert.equal(badArgs.isError, true, 'invalid args → isError');
     assert.match(JSON.stringify(badArgs.content), /Invalid arguments/);
+
+    // The mode-selection guard is the OTHER fail-closed path — schema-valid, but no
+    // list mode chosen. It must also refuse without reaching the SDK rather than
+    // defaulting to some arbitrary listing.
+    const noMode = await client.callTool({ name: 'record_query', arguments: {} });
+    assert.equal(noMode.isError, true, 'no mode selector → isError');
+    assert.match(JSON.stringify(noMode.content), /folderId/);
+    assert.match(JSON.stringify(noMode.content), /recent/);
 
     // The highest-severity cold-agent trap found in review: an INVENTED top-level arg
     // must ERROR, not silently fall through to a default mode. Before strict validation,

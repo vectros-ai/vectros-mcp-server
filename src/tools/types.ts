@@ -30,6 +30,8 @@ import type { Logger } from '../log.js';
  *                             audit trail)
  * 0.41.0 SDK adoption:        record_batch_get (POST /v1/records/batch-get went
  *                             live in 0.41.0 — previously a 501 stub)
+ * 0.43.0 SDK adoption:        record_batch_write (POST /v1/records/batch went
+ *                             live in 0.43.0 — previously a 501 stub)
  */
 export const TOOL_NAMES = [
   'hybrid_search',
@@ -37,6 +39,7 @@ export const TOOL_NAMES = [
   'record_get',
   'record_batch_get',
   'record_create',
+  'record_batch_write',
   'record_update',
   'record_delete',
   'rag_ask',

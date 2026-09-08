@@ -2710,3 +2710,219 @@ test('version_history surfaces a backend error as isError', async () => {
   assert.equal(r.isError, true);
   assert.match(r.content[0].text, /Not found/);
 });
+
+// ============================================================================
+// scopeFilters (API 0.43.0) — multi-dimension ownership narrowing
+// ============================================================================
+
+test('hybrid_search passes scopeFilters through to search.content', async () => {
+  const s = spy();
+  const client = {
+    search: {
+      content: async (args: unknown) => {
+        s.record('search.content', args);
+        return { results: [], searchTimeMs: 0, totalResults: 0 };
+      },
+    },
+  } as never;
+  await hybridSearch({ client, log }).handler(
+    { query: 'q', scopeFilters: ['org:o1', 'client:c1'] },
+    {},
+  );
+  const a = s.calls[0].args as Record<string, unknown>;
+  assert.deepEqual(a.scopeFilters, ['org:o1', 'client:c1']);
+  assert.equal(a.scope, undefined);
+});
+
+test('hybrid_search rejects scope + scopeFilters together WITHOUT calling the API', async () => {
+  // Mutually exclusive server-side. Answering locally saves the agent a round trip
+  // and names both fields; the guard must also not reach the SDK at all.
+  const s = spy();
+  const client = {
+    search: {
+      content: async (args: unknown) => {
+        s.record('search.content', args);
+        return { results: [], searchTimeMs: 0, totalResults: 0 };
+      },
+    },
+  } as never;
+  const r = await hybridSearch({ client, log }).handler(
+    { query: 'q', scope: 'org:o1', scopeFilters: ['org:o1', 'client:c1'] },
+    {},
+  );
+  assert.equal(r.isError, true);
+  assert.match(r.content[0].text, /mutually exclusive/i);
+  assert.match(r.content[0].text, /scopeFilters/);
+  assert.equal(s.calls.length, 0, 'the rejection must short-circuit before the SDK call');
+});
+
+test('hybrid_search still accepts scope alone (the single-dimension form is unchanged)', async () => {
+  const s = spy();
+  const client = {
+    search: {
+      content: async (args: unknown) => {
+        s.record('search.content', args);
+        return { results: [], searchTimeMs: 0, totalResults: 0 };
+      },
+    },
+  } as never;
+  const r = await hybridSearch({ client, log }).handler({ query: 'q', scope: 'org:o1' }, {});
+  assert.ok(!r.isError);
+  const a = s.calls[0].args as Record<string, unknown>;
+  assert.equal(a.scope, 'org:o1');
+  assert.equal(a.scopeFilters, undefined);
+});
+
+test('rag_ask passes search.scopeFilters through to the retrieval config', async () => {
+  const s = spy();
+  const client = {
+    inference: {
+      ragInference: async (args: unknown) => {
+        s.record('ragInference', args);
+        return (async function* () {
+          yield { event: 'content_delta', text: 'ok' } as never;
+          yield { event: 'done' } as never;
+        })();
+      },
+    },
+  } as never;
+  await ragAsk({ client, log }).handler(
+    { query: 'q', search: { scopeFilters: ['org:o1', 'client:c1'] } },
+    {},
+  );
+  const a = s.calls[0].args as { search: Record<string, unknown> };
+  assert.deepEqual(a.search.scopeFilters, ['org:o1', 'client:c1']);
+  assert.equal(a.search.scope, undefined);
+});
+
+test('rag_ask rejects search.scope + search.scopeFilters together WITHOUT calling the API', async () => {
+  const s = spy();
+  const client = {
+    inference: {
+      ragInference: async (args: unknown) => {
+        s.record('ragInference', args);
+        return (async function* () {
+          yield { event: 'done' } as never;
+        })();
+      },
+    },
+  } as never;
+  const r = await ragAsk({ client, log }).handler(
+    { query: 'q', search: { scope: 'org:o1', scopeFilters: ['client:c1'] } },
+    {},
+  );
+  assert.equal(r.isError, true);
+  assert.match(r.content[0].text, /mutually exclusive/i);
+  assert.equal(s.calls.length, 0, 'the rejection must short-circuit before the SDK call');
+});
+
+// ============================================================================
+// record_query list-mode selection: type | folderId | recent (0.17.0)
+// ============================================================================
+
+function listRecordsSpy(): { s: ReturnType<typeof spy>; client: never } {
+  const s = spy();
+  const client = {
+    records: {
+      listRecords: async (args: unknown) => {
+        s.record('listRecords', args);
+        return { data: [], nextCursor: null };
+      },
+      lookupRecordsByBody: async (args: unknown) => {
+        s.record('lookupRecordsByBody', args);
+        return { data: [], nextCursor: null };
+      },
+    },
+  } as never;
+  return { s, client };
+}
+
+test('record_query lists by folderId, with no type, and does not send a recent flag', async () => {
+  const { s, client } = listRecordsSpy();
+  const r = await recordQuery({ client, log }).handler({ folderId: 'fld_1' }, {});
+  assert.ok(!r.isError);
+  const a = s.calls[0].args as Record<string, unknown>;
+  assert.equal(s.calls[0].method, 'listRecords');
+  assert.equal(a.folderId, 'fld_1');
+  assert.equal(a.type, undefined);
+  assert.ok(!('recent' in a), 'an unrequested recent must be ABSENT, never the string "false"');
+});
+
+test('record_query combines type + folderId (one type within one folder)', async () => {
+  const { s, client } = listRecordsSpy();
+  await recordQuery({ client, log }).handler({ type: 'task', folderId: 'fld_1' }, {});
+  const a = s.calls[0].args as Record<string, unknown>;
+  assert.equal(a.type, 'task');
+  assert.equal(a.folderId, 'fld_1');
+});
+
+test('record_query sends recent as the string "true" the query param expects', async () => {
+  const { s, client } = listRecordsSpy();
+  await recordQuery({ client, log }).handler({ recent: true }, {});
+  const a = s.calls[0].args as Record<string, unknown>;
+  assert.equal(a.recent, 'true', 'recent is a STRING query param on the wire, not a boolean');
+});
+
+test('record_query rejects recent combined with type or folderId', async () => {
+  const { s, client } = listRecordsSpy();
+  const r1 = await recordQuery({ client, log }).handler({ recent: true, type: 'task' }, {});
+  assert.equal(r1.isError, true);
+  assert.match(r1.content[0].text, /mutually exclusive/i);
+  const r2 = await recordQuery({ client, log }).handler({ recent: true, folderId: 'fld_1' }, {});
+  assert.equal(r2.isError, true);
+  assert.equal(s.calls.length, 0, 'neither rejection may reach the SDK');
+});
+
+test('record_query rejects recent combined with owner filters rather than dropping them silently', async () => {
+  // The API ignores userId/scope in recent mode. Silently returning an unfiltered feed
+  // while the agent believes it filtered is the failure this tool consistently refuses.
+  const { s, client } = listRecordsSpy();
+  const r = await recordQuery({ client, log }).handler({ recent: true, userId: 'usr_1' }, {});
+  assert.equal(r.isError, true);
+  assert.match(r.content[0].text, /ignores the owner filters|userId/i);
+  assert.equal(s.calls.length, 0);
+});
+
+test('record_query rejects a list with no mode selector at all', async () => {
+  const { s, client } = listRecordsSpy();
+  const r = await recordQuery({ client, log }).handler({ userId: 'usr_1' }, {});
+  assert.equal(r.isError, true);
+  assert.match(r.content[0].text, /type.*folderId.*recent|one of/i);
+  assert.equal(s.calls.length, 0);
+});
+
+test('record_query still requires type for a LOOKUP', async () => {
+  const { s, client } = listRecordsSpy();
+  const r = await recordQuery({ client, log }).handler({ field: 'externalId', value: 'x-1' }, {});
+  assert.equal(r.isError, true);
+  assert.match(r.content[0].text, /lookup/i);
+  assert.equal(s.calls.length, 0, 'must not fall through to a lookup with an undefined type');
+});
+
+test('record_query list-by-type is unchanged by the new modes', async () => {
+  const { s, client } = listRecordsSpy();
+  await recordQuery({ client, log }).handler({ type: 'task', userId: 'usr_1', scope: 'org:o1' }, {});
+  const a = s.calls[0].args as Record<string, unknown>;
+  assert.equal(a.type, 'task');
+  assert.equal(a.userId, 'usr_1');
+  assert.equal(a.scope, 'org:o1');
+  assert.equal(a.folderId, undefined);
+});
+
+test('record_query rejects list-mode selectors on a LOOKUP rather than ignoring them', async () => {
+  // Mirror of the lookup-args guard: a lookup runs within one type and ignores folderId/recent,
+  // so accepting them would run a lookup while the agent believes it scoped to a folder.
+  const { s, client } = listRecordsSpy();
+  const r1 = await recordQuery({ client, log }).handler(
+    { type: 't', field: 'externalId', value: 'x', folderId: 'fld_1' },
+    {},
+  );
+  assert.equal(r1.isError, true);
+  assert.match(r1.content[0].text, /list-mode selectors|do not apply/i);
+  const r2 = await recordQuery({ client, log }).handler(
+    { type: 't', field: 'externalId', value: 'x', recent: true },
+    {},
+  );
+  assert.equal(r2.isError, true);
+  assert.equal(s.calls.length, 0, 'neither may reach the SDK');
+});

@@ -184,14 +184,14 @@ resolves to its main repo's `.mcp.json` — add and open from the same project.
 > for a plain `npx` run, or pin an explicit version (`npx -y
 > @vectros-ai/mcp-server@<version>`) known to work.
 
-## Tools (22 tools)
+## Tools (23 tools)
 
 **Search & RAG**
 
 | Tool | What it does |
 |---|---|
-| `hybrid_search` | Hybrid BM25 + dense search across the tenant's indexed content (records + documents). Narrow by ownership, folder, type, metadata filters, a created date window, and keyword-precision (`textMode`) / relevance floors. Returns the indexed projection of each hit. |
-| `rag_ask` | Ask a question grounded against the indexed corpus. Scope retrieval (ownership / folder / type / metadata filters / date window) and steer generation (`instructions` / `temperature`). Streaming generation aggregated; progress notifications keep the call alive for the generation window. |
+| `hybrid_search` | Hybrid BM25 + dense search across the tenant's indexed content (records + documents). Narrow by ownership (`scope` for one dimension, `scopeFilters` for several at once — e.g. one client within one org), folder, type, metadata filters, a created date window, and keyword-precision (`textMode`) / relevance floors. Returns the indexed projection of each hit. |
+| `rag_ask` | Ask a question grounded against the indexed corpus. Scope retrieval (ownership — `scope` or multi-dimension `scopeFilters` — / folder / type / metadata filters / date window) and steer generation (`instructions` / `temperature`). Streaming generation aggregated; progress notifications keep the call alive for the generation window. |
 | `document_ask` | Ask a question grounded against a single document. Same aggregation + progress-notification shape as `rag_ask`. |
 
 **Records** (structured, schema-validated data)
@@ -199,10 +199,11 @@ resolves to its main repo's `.mcp.json` — add and open from the same project.
 | Tool | What it does |
 |---|---|
 | `list_schemas` | List the record-schema catalog the credential can see (filter by `surface` or resolve one by `recordType`). Makes `record_query` / `record_create` discoverable. |
-| `record_query` | Query records by lookup field — equality (`value`), range, or prefix, with `asc`/`desc` ordering and an optional `sortFrom`/`sortTo` window — or list mode (filter by ownership + type). Also supports composite equality across 2-3 fields (`values`), but only against a lookup the *schema* declares over those fields together (see `list_schemas`) — not any two fields you pick. |
+| `record_query` | Query records by lookup field — equality (`value`), range, or prefix, with `asc`/`desc` ordering and an optional `sortFrom`/`sortTo` window — or list mode, choosing one of `type`, `folderId` (every record in a folder, any type — combine with `type` to narrow), or `recent` (the account-wide recently-updated feed across all types), then optionally filtering the first two by ownership. Also supports composite equality across 2-3 fields (`values`), but only against a lookup the *schema* declares over those fields together (see `list_schemas`) — not any two fields you pick. |
 | `record_get` | Fetch one record by id, including its full payload (large payloads truncated to protect the agent context window). |
 | `record_batch_get` | Fetch several records by id (1-100) in one call, each with its full payload. Returns `missingIds` for any requested id you can't access, since the API silently omits them. |
 | `record_create` | Create a record of a given type; idempotent by `externalId`; optional per-record `indexMode`. |
+| `record_batch_write` | Create or upsert up to 50 records in one call, instead of N `record_create` round-trips. Items may mix types and are validated and scope-checked individually. `atomicity: all_or_nothing` commits them as one transaction (nothing is written if any item fails); the default `best_effort` writes each independently. Reports success whenever the batch was *processed* — read the per-item `results`, not just the absence of an error. |
 | `record_update` | Patch a record's payload (deep-merged; `null` deletes a key); optimistic concurrency via `expectedVersion`. |
 | `record_delete` | Permanently delete a record by id (leaves a tombstone). |
 
@@ -223,7 +224,7 @@ resolves to its main repo's `.mcp.json` — add and open from the same project.
 | `folder_query` | Get a folder by id, or list folders (a parent's children for tree navigation, or a flat tenant list; paginated via `nextCursor`). |
 | `folder_create` | Create a folder. |
 | `folder_update` | Update a folder's name / description / ownership (merge-patch; optimistic concurrency via `expectedVersion`; folders cannot be re-parented). |
-| `folder_delete` | Delete a folder. |
+| `folder_delete` | Delete a folder. It must be empty first — no documents, no records, and no sub-folders — and a context root is protected outright. |
 
 **Identity & history**
 
@@ -233,7 +234,7 @@ resolves to its main repo's `.mcp.json` — add and open from the same project.
 | `lookup_principal` | Resolve a user, or an identity entity in a namespace (`org`/`client`/any namespace you registered), by your own `externalId` (→ its Vectros UUID, for the ownership filters) or by a schema lookup field. Pass `contextId` to target a specific app context for a context-owned namespace. Read-only. |
 | `version_history` | Read the audit/version trail (CREATE/UPDATE/DELETE, with actor + diff) for one record or document. Read-only. |
 
-All 22 tools wrap published Vectros HTTP API endpoints. JSON
+All 23 tools wrap published Vectros HTTP API endpoints. JSON
 responses are what the agent sees as tool output. Per-call cost
 surfaces via the `usage` field on inference responses.
 
@@ -274,6 +275,20 @@ See the Vectros developer documentation on scoped tokens ("Recommended
 AccessProfile for MCP") for least-privilege credential setup — the
 `vectros bootstrap` flow provisions a scoped `ssk_*` key and its AccessProfile
 in one command.
+
+> **A root `sk_*` can no longer file into another app context, as of API 0.43.0.**
+> If you run this server on a root key and a tool call names a `folderId` /
+> `parentFolderId` — or a `schemaId` on a document — belonging to a context other
+> than `default`, it is now refused with a uniform `400 "Folder not found"` /
+> `"Schema not found"`. This affects `document_ingest`, `document_update`,
+> `record_create`, `record_update` and `folder_create`, and it is a change in
+> outcome: those calls used to succeed. They never did what they appeared to,
+> though — a root key's writes are always stamped `default`, so the row landed in
+> `default` while its folder or schema lived elsewhere, permanently invisible to
+> the context that owned them. Existing rows written the old way are untouched and
+> still readable, updatable and deletable. The fix is the same scoped key
+> recommended above: one bound to the target context can file into it and always
+> could.
 
 ## Credential resolution
 
@@ -377,6 +392,49 @@ const server = new VectrosMCPServer({
 });
 await server.connect(createStdioTransport());
 ```
+
+## What this server deliberately doesn't expose
+
+This is a decision, not a backlog. An MCP server is a tool surface handed to an
+autonomous caller, so a capability the API offers is not automatically a tool —
+each one has to earn its place on an agent's surface.
+
+The line is the **data plane**: records, documents, folders and search are here in
+full. Anything that grants or administers authority is not, and neither is the
+design-time layer that defines the data model.
+
+- **Stored scripts** (`/v1/scripts` — push, list, fetch, delete). A stored script is
+  code, not data. Authoring it is a design-time act, the same reason schema mutation
+  lives in the CLI rather than here: an agent that can write the code that later runs
+  under your credential is a different proposition from one that can write records.
+- **Synchronous script execution** (`POST /v1/scripts/execute`, the `scripts:x` scope).
+  The closer call of the two, and excluded on operational grounds rather than reach —
+  a `scripts:x:<name>` grant is a deliberately narrow, per-script permission, and an
+  ordinary scoped key can hold it. What an agent handles badly is the failure surface:
+  a run whose outcome cannot be determined returns `500 EXECUTION_OUTCOME_UNKNOWN` with
+  writes that may or may not have committed, which is not something a caller resolves
+  by retrying — it has to go and look. Getting a retry right also means reusing an
+  `Idempotency-Key` across attempts, and a tool call has no natural retry identity, so
+  an agent re-invoking after a timeout would silently run the script a second time.
+  Exposing this well needs a deliberate design for those two things, not a thin wrapper.
+  Until then, run scripts from a caller that can handle them — the API, the SDK, or the
+  CLI.
+- **Trigger rules** (`/v1/triggers`). Declaring a rule grants authority — a rule's
+  `scopes`/`roleIds` are live, and declaring one is scope-monotonicity-checked like
+  any other authority-granting surface. Minting authority is not an agent action.
+- **Trigger failure history** (`GET /v1/trigger-failures`) and **usage/billing**
+  (`GET /v1/usage`). Both are read-only, and both are operational rather than
+  data-plane — they describe how your automation and your account are behaving, not
+  what your content says. That is a question for the developer portal or the CLI,
+  where a person is looking at it, rather than a tool an agent reaches for mid-task.
+- **Identity, access and credential administration** — users, access profiles,
+  roles, app contexts, issuer registrations, and scoped-key minting. Unchanged
+  since launch: identity CRUD stays off the agent tool surface by design.
+  `lookup_principal` resolves an identifier to an id and does nothing else.
+- **Compliance operations** (erasure, export). Same reason.
+
+If one of these belongs on your agent's surface, that's worth telling us — the
+line is drawn on purpose and can be redrawn with a reason.
 
 ## What this server doesn't do (yet)
 

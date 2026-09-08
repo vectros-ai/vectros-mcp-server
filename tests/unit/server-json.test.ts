@@ -84,6 +84,37 @@ test('VECTROS_API_KEY env var is declared required + secret', () => {
   assert.equal(key!.isSecret, true);
 });
 
+test('the .mcpb extension tool list matches the real tool registry exactly', () => {
+  // The Claude Desktop extension lists every tool by name, and that list is PUBLISHED
+  // surface a user reads before installing — but nothing derives it from the registry,
+  // so adding a tool silently leaves it short (a user sees a catalog that under-reports
+  // what the extension actually installs). Pin it to TOOL_NAMES, the same invariant the
+  // server itself registers from.
+  const tools = manifest.tools as Array<Record<string, unknown>>;
+  const listed = tools.map((t) => t.name as string).sort();
+  assert.deepEqual(
+    listed,
+    [...TOOL_NAMES].sort(),
+    'mcpb/manifest.json `tools` must name exactly the registered tools',
+  );
+  for (const t of tools) {
+    assert.ok(
+      typeof t.description === 'string' && (t.description as string).trim().length > 0,
+      `${t.name as string}: extension listing needs a description`,
+    );
+  }
+});
+
+test('the extension long_description tool count tracks the real tool registry', () => {
+  // Same class of drift as the VECTROS_MCP_TOOLS count below, on a different published
+  // copy: the store listing states "N data-plane tools" in prose.
+  assert.match(
+    manifest.long_description as string,
+    new RegExp(`${TOOL_NAMES.length} data-plane tools`),
+    `expected long_description to say "${TOOL_NAMES.length} data-plane tools"`,
+  );
+});
+
 test('the documented tool count tracks the real tool registry', () => {
   // The VECTROS_MCP_TOOLS env description states "all N tools" — keep N honest
   // so a tool added/removed in the registry forces a manifest copy update.

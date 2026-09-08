@@ -27,10 +27,12 @@ import documentIngest from '../../src/tools/document_ingest.js';
 import recordCreate from '../../src/tools/record_create.js';
 import recordGet from '../../src/tools/record_get.js';
 import recordBatchGet from '../../src/tools/record_batch_get.js';
+import recordBatchWrite from '../../src/tools/record_batch_write.js';
 import recordUpdate from '../../src/tools/record_update.js';
 import recordDelete from '../../src/tools/record_delete.js';
 import lookupPrincipal from '../../src/tools/lookup_principal.js';
 import versionHistory from '../../src/tools/version_history.js';
+import { zodShapeToJsonSchema } from '../../src/zod-to-json-schema.js';
 
 const log = pino({ level: 'silent' });
 
@@ -56,6 +58,7 @@ const tools = {
   record_create: recordCreate({ client: fakeClient, log }),
   record_get: recordGet({ client: fakeClient, log }),
   record_batch_get: recordBatchGet({ client: fakeClient, log }),
+  record_batch_write: recordBatchWrite({ client: fakeClient, log }),
   record_update: recordUpdate({ client: fakeClient, log }),
   record_delete: recordDelete({ client: fakeClient, log }),
   lookup_principal: lookupPrincipal({ client: fakeClient, log }),
@@ -112,9 +115,26 @@ test('record_query accepts lookup mode', () => {
   assert.ok(r.success);
 });
 
-test('record_query rejects missing type', () => {
-  const r = validate('record_query', { userId: 'usr_1' });
-  assert.ok(!r.success);
+test('record_query no longer requires type at the SCHEMA level (mode decides)', () => {
+  // `type` became optional in 0.17.0 because list mode can now select by `folderId` or
+  // `recent` instead. The requirement did not disappear — it moved into the handler,
+  // where it depends on the mode (see the handler tests: a lookup still demands `type`,
+  // and a list with no mode selector at all is rejected). Asserting it here would pin the
+  // requirement to the wrong layer.
+  assert.ok(validate('record_query', { folderId: 'fld_1' }).success, 'list by folder needs no type');
+  assert.ok(validate('record_query', { recent: true }).success, 'the recent feed needs no type');
+  assert.ok(
+    !validate('record_query', { type: '' }).success,
+    'an EMPTY type is still rejected — optional means absent, not blank',
+  );
+});
+
+test('record_query accepts folderId + type together (one type within one folder)', () => {
+  assert.ok(validate('record_query', { type: 'task', folderId: 'fld_1' }).success);
+});
+
+test('record_query rejects a non-boolean recent', () => {
+  assert.ok(!validate('record_query', { recent: 'true' }).success, 'recent is a boolean on the tool surface');
 });
 
 test('record_query accepts limit up to the API max (100) + a startFrom cursor', () => {
@@ -490,5 +510,250 @@ test('every tool has the expected MCP-required fields', () => {
     assert.ok(t.description && t.description.length > 20, 'description (substantive)');
     assert.ok(t.inputSchema, 'inputSchema');
     assert.ok(typeof t.handler === 'function', 'handler');
+  }
+});
+
+// record_batch_write --------------------------------------------------------
+const batchItem = (n: number) => ({ type: 'task', fields: { title: `t${n}` } });
+
+test('record_batch_write accepts 1 to the API max (50) items', () => {
+  assert.ok(validate('record_batch_write', { items: [batchItem(0)] }).success);
+  assert.ok(
+    validate('record_batch_write', { items: Array.from({ length: 50 }, (_, i) => batchItem(i)) }).success,
+    '50 items (the API max, identical for both atomicity modes) is allowed',
+  );
+});
+
+test('record_batch_write rejects an empty items array or more than 50', () => {
+  assert.ok(!validate('record_batch_write', { items: [] }).success, 'empty array rejected — nothing to write');
+  assert.ok(
+    !validate('record_batch_write', { items: Array.from({ length: 51 }, (_, i) => batchItem(i)) }).success,
+    '51 exceeds the API max',
+  );
+});
+
+test('record_batch_write validates each ITEM, not just the array', () => {
+  // A per-item shape error must be caught here rather than reaching the API as a
+  // 400 the agent has to decode.
+  assert.ok(!validate('record_batch_write', { items: [{ fields: {} }] }).success, 'item without `type` rejected');
+  assert.ok(!validate('record_batch_write', { items: [{ type: 'task' }] }).success, 'item without `fields` rejected');
+  assert.ok(!validate('record_batch_write', { items: [{ type: '', fields: {} }] }).success, 'empty `type` rejected');
+  assert.ok(
+    !validate('record_batch_write', { items: [{ type: 'task', fields: {}, indexMode: 'SOMETHING' }] }).success,
+    'a bad indexMode on one item rejects the batch',
+  );
+});
+
+test('record_batch_write accepts the optional batch-level knobs and rejects a bad atomicity', () => {
+  assert.ok(
+    validate('record_batch_write', {
+      items: [batchItem(0)],
+      atomicity: 'all_or_nothing',
+      upsert: true,
+      allowClear: true,
+    }).success,
+  );
+  assert.ok(validate('record_batch_write', { items: [batchItem(0)], atomicity: 'best_effort' }).success);
+  assert.ok(
+    !validate('record_batch_write', { items: [batchItem(0)], atomicity: 'ALL_OR_NOTHING' }).success,
+    'the API rejects any value that is not one of the two rather than defaulting — so must the schema, ' +
+      'or a typo silently downgrades a transactional batch',
+  );
+});
+
+test('record_batch_write requires items', () => {
+  assert.ok(!validate('record_batch_write', {}).success);
+});
+
+// ---------------------------------------------------------------------------
+// Description invariants.
+//
+// A tool description is not documentation a human skims — it is the input the
+// agent reasons from when selecting a tool and filling its args, and nothing
+// else in the suite reads it. Where a description states a BEHAVIOURAL claim,
+// pin it to the same invariant the behaviour is tested for, so the two cannot
+// drift apart silently.
+// ---------------------------------------------------------------------------
+
+test('record_batch_write description states the item cap its schema actually enforces', () => {
+  // The stated number and the enforced number are two different artifacts; an
+  // agent that trusts a stale description builds a batch that is rejected locally.
+  assert.match(tools.record_batch_write.description, /\b50\b/);
+  assert.ok(
+    validate('record_batch_write', { items: Array.from({ length: 50 }, (_, i) => batchItem(i)) }).success,
+  );
+  assert.ok(
+    !validate('record_batch_write', { items: Array.from({ length: 51 }, (_, i) => batchItem(i)) }).success,
+  );
+});
+
+test('record_batch_write description warns that a fully-failed batch is not an error result', () => {
+  // The endpoint returns 200 whenever the batch was PROCESSED. This is the single
+  // most likely thing for an agent to get wrong, and the handler test
+  // ('reports a wholly-failed batch as a SUCCESSFUL call') pins the matching behaviour.
+  assert.match(tools.record_batch_write.description, /results/);
+  assert.match(tools.record_batch_write.description, /every item failed/i);
+});
+
+test('record_batch_write description names the two 0.43.0-new per-item statuses', () => {
+  // `forbidden` and `not_committed` were previously inexpressible, and they call for
+  // DIFFERENT remedies (fix the credential vs resubmit the batch) — an agent that
+  // does not know them treats both as a payload problem.
+  assert.match(tools.record_batch_write.description, /forbidden/);
+  assert.match(tools.record_batch_write.description, /not_committed/);
+});
+
+test('folder_delete description states the emptiness precondition, including records', () => {
+  // API 0.43.0 widened the refusal: records now block a folder delete alongside
+  // documents and sub-folders. Being non-empty is the most common way this call
+  // fails, and the description previously named only protected folders.
+  const d = tools.folder_delete.description;
+  assert.match(d, /empty/i);
+  assert.match(d, /records/i, 'records must be named — 0.43.0 made them block the delete');
+  assert.match(d, /sub-folders|subfolders/i);
+});
+
+test('hybrid_search and rag_ask describe scopeFilters as mutually exclusive with scope', () => {
+  // The pair is rejected together both locally (handler) and server-side. An agent
+  // that reads only `scope`'s description would never discover the multi-dimension
+  // form; one that sets both gets a refusal it can act on.
+  const hs = tools.hybrid_search.inputSchema as Record<string, z.ZodTypeAny>;
+  assert.match(hs.scope!.description ?? '', /mutually exclusive/i);
+  assert.match(hs.scopeFilters!.description ?? '', /mutually exclusive/i);
+
+  // rag_ask nests both under `search`, so reach into the object's shape rather
+  // than asserting on the wrapper's own description.
+  const ra = tools.rag_ask.inputSchema as Record<string, z.ZodTypeAny>;
+  const searchShape = (ra.search as z.ZodOptional<z.ZodObject<z.ZodRawShape>>).unwrap().shape;
+  assert.ok(searchShape.scopeFilters, 'rag_ask.search must expose scopeFilters');
+  assert.match(searchShape.scope!.description ?? '', /mutually exclusive/i);
+  assert.match(searchShape.scopeFilters!.description ?? '', /mutually exclusive/i);
+
+  assert.match(tools.hybrid_search.description, /scopeFilters/);
+  assert.match(tools.rag_ask.description, /scopeFilters/);
+});
+
+test('record_batch_write publishes the ITEM shape in its JSON Schema, not a bare array', () => {
+  // record_batch_write is the first tool whose input nests objects inside an array.
+  // The JSON Schema is literally what the agent reads to construct a call, so an
+  // `items: {}` fallback would leave it guessing every per-item field name — the tool
+  // would look callable and be unusable. Pin the recursion.
+  const js = zodShapeToJsonSchema(tools.record_batch_write.inputSchema) as {
+    properties: Record<string, Record<string, unknown>>;
+    required?: string[];
+  };
+  const itemsProp = js.properties.items as { type: string; items: Record<string, unknown> };
+  assert.equal(itemsProp.type, 'array');
+  const item = itemsProp.items as { type: string; properties: Record<string, unknown>; required?: string[] };
+  assert.equal(item.type, 'object');
+  assert.ok(item.properties.type, 'the item schema must name `type`');
+  assert.ok(item.properties.fields, 'the item schema must name `fields`');
+  assert.ok(item.properties.externalId, 'the item schema must name the optional `externalId`');
+  assert.deepEqual([...(item.required ?? [])].sort(), ['fields', 'type']);
+  assert.deepEqual(js.required, ['items'], 'only `items` is required at the top level');
+});
+
+test('record_batch_write REJECTS an unknown per-item key rather than silently dropping it', () => {
+  // The API's record shape carries fields this tool does not map (expiresAt is a TTL,
+  // plus schemaId/expectedVersion). Stripping them silently would report `created` for
+  // 50 records that never expire. The server strict-checks the top level; nested objects
+  // need their own strictness.
+  assert.ok(
+    !validate('record_batch_write', {
+      items: [{ type: 'task', fields: { a: 1 }, expiresAt: '2027-01-01T00:00:00Z' }],
+    }).success,
+    'an unmapped `expiresAt` must be rejected, not dropped',
+  );
+  assert.ok(
+    !validate('record_batch_write', { items: [{ type: 'task', fields: {}, schemaId: 'sch_1' }] }).success,
+  );
+  assert.ok(
+    validate('record_batch_write', { items: [{ type: 'task', fields: {}, folderId: 'fld_1' }] }).success,
+    'a key the tool DOES map still passes',
+  );
+});
+
+test('scopeFilters rejects an empty array on both tools (the API 400s on it)', () => {
+  assert.ok(!validate('hybrid_search', { query: 'q', scopeFilters: [] }).success);
+  assert.ok(!validate('rag_ask', { query: 'q', search: { scopeFilters: [] } }).success);
+});
+
+test('hybrid_search states the ARCHIVED exclusion for RECORDS as well as documents', () => {
+  // Records have refused to index while archived since API 0.35; the description said
+  // "documents" only, which read as an asymmetry implying archived records still match.
+  const d = tools.hybrid_search.description;
+  assert.match(d, /ARCHIVED/);
+  assert.match(d, /records/i, 'records must be named, not just documents');
+});
+
+test('hybrid_search warns that a pre-enforcement archived item can still be returned', () => {
+  // API 0.43.0 fixed the write paths but explicitly does NOT sweep existing
+  // archived-but-still-searchable items: they stay that way until written to again.
+  // "never appear in results" would therefore be a false absolute.
+  const d = tools.hybrid_search.description;
+  assert.doesNotMatch(d, /ARCHIVED \(soft-retracted\) documents never appear/);
+  assert.match(d, /re-send status ARCHIVED|re-assert the retraction/i, 'the repair path must be named');
+});
+
+test('the date-window params are described as CREATION time — the platform contract', () => {
+  // Two different fields, and an earlier revision of this branch conflated them:
+  //   • a hit's RETURNED createdAt is the search-index timestamp (later for a re-indexed item);
+  //   • the createdAfter/createdBefore FILTERS are documented "created at or after" and the
+  //     platform deliberately preserves that — applyTimeRange uses the row's true, unchanging
+  //     createdAt for anything past its first index, and only borrows the index time AT first
+  //     index as a bounded clock-skew allowance.
+  // Describing the filters as index-time was backwards for exactly the re-index case it named,
+  // and this test previously asserted /index/i, holding the error in place. Assert the contract.
+  const hs = tools.hybrid_search.inputSchema as Record<string, z.ZodTypeAny>;
+  for (const f of ['createdAfter', 'createdBefore']) {
+    const d = hs[f]!.description ?? '';
+    assert.match(d, /CREATED/, `${f} must state the creation-time contract`);
+    assert.doesNotMatch(
+      d,
+      /do not read this as a source-creation filter|search index's own timestamp/,
+      `${f} must not re-assert the index-time reading`,
+    );
+  }
+  const ra = tools.rag_ask.inputSchema as Record<string, z.ZodTypeAny>;
+  const searchShape = (ra.search as z.ZodOptional<z.ZodObject<z.ZodRawShape>>).unwrap().shape;
+  assert.match(searchShape.createdAfter!.description ?? '', /CREATED/);
+
+  // The hit-level field keeps the index-time note — that one IS index time.
+  assert.match(tools.hybrid_search.description, /index/i);
+});
+
+test('record_batch_write states the best_effort intra-batch duplicate behaviour, not an absolute', () => {
+  // duplicate_in_batch is raised by the transactional path only — writeBestEffort opens no scope,
+  // so claimIntraScopeUniqueness early-returns and the second item matches what the first wrote
+  // and reports `updated`. Claiming a bare "refused as a conflict" would tell an agent a
+  // duplicated spreadsheet key is caught when by default it silently collapses two rows into one.
+  const d = tools.record_batch_write.description;
+  const ext = (tools.record_batch_write.inputSchema as Record<string, z.ZodTypeAny>);
+  const itemsDesc = JSON.stringify(zodShapeToJsonSchema(tools.record_batch_write.inputSchema));
+  assert.ok(ext.items, 'items present');
+  assert.match(itemsDesc, /all_or_nothing/, 'the qualification must name the mode that does detect it');
+  assert.match(itemsDesc, /best_effort/, 'and the default mode that does not');
+  assert.doesNotMatch(
+    itemsDesc,
+    /externalId in the SAME batch is a different case and is refused/,
+    'the unqualified "refused as a conflict" claim must be gone',
+  );
+  assert.ok(d.length > 20);
+});
+
+test('scopes is described by data_scope, not by the credential identity', () => {
+  // The platform states the opposite of what these said: identity supplies the DEFAULT and
+  // "does not limit which value you may state"; the bound is the granting clause's data_scope.
+  for (const t of ['record_create', 'record_batch_write'] as const) {
+    const shape = tools[t].inputSchema as Record<string, z.ZodTypeAny>;
+    const raw = t === 'record_create'
+      ? (shape.scopes!.description ?? '')
+      : JSON.stringify(zodShapeToJsonSchema(tools[t].inputSchema));
+    assert.match(raw, /data_scope/, `${t}: the real bound must be named`);
+    assert.doesNotMatch(
+      raw,
+      /values must come from the credential's own identity/,
+      `${t}: the false identity-bound claim must be gone`,
+    );
   }
 });
