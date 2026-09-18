@@ -15,7 +15,7 @@
  *   - a loud, explicit opt-out (`VECTROS_ALLOW_INSECURE_BASE_URL=1`) permits
  *     an arbitrary host for a trusted local proxy, AFTER a warning.
  *
- * Mirrors `packages/cli/src/base-url.ts`. Kept as a tiny per-package module
+ * Mirrors the same guard in a sibling package's CLI. Kept as a tiny per-package module
  * rather than a new shared workspace dependency. Warnings go to stderr (or an
  * injected logger) — NEVER stdout (stdio-transport purity).
  */

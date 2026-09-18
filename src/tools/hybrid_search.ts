@@ -213,6 +213,8 @@ const hybridSearch: ToolFactory = ({ client, log }) => ({
     'PHRASE mode finding no contiguous match for a long natural-language query. Loosen the keyword leg: shorten the ' +
     'query to its key terms, or set textMode "AND" (all terms, higher precision) or "OR" (any term, broad recall).',
   inputSchema,
+  // A pure read — never creates, modifies, or deletes anything server-side.
+  annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true },
   handler: async (args): Promise<ToolResult> => {
     const limit = (args.limit as number | undefined) ?? MCP_DEFAULT_LIMIT;
     const mode = (args.mode as 'HYBRID' | 'TEXT' | 'SEMANTIC' | undefined) ?? 'HYBRID';

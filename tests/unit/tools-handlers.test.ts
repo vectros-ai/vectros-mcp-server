@@ -27,7 +27,7 @@ import documentAsk from '../../src/tools/document_ask.js';
 import listSchemas from '../../src/tools/list_schemas.js';
 import documentGet from '../../src/tools/document_get.js';
 import currentIdentity from '../../src/tools/current_identity.js';
-import documentIngest from '../../src/tools/document_ingest.js';
+import documentIngest, { presignedUploadHeaders } from '../../src/tools/document_ingest.js';
 import recordCreate from '../../src/tools/record_create.js';
 import lookupPrincipal from '../../src/tools/lookup_principal.js';
 import versionHistory from '../../src/tools/version_history.js';
@@ -1698,6 +1698,8 @@ test('document_ingest file mode reads + uploads + returns indexStatus PENDING_IN
     const headers = fetchCalls[0].init?.headers as Record<string, string>;
     assert.equal(headers['Content-Type'], 'text/plain');
     assert.equal(headers.Authorization, undefined, 'no auth on presigned PUT');
+    // The response names no required header, so none beyond Content-Type is sent.
+    assert.deepEqual(headers, { 'Content-Type': 'text/plain' });
 
     // Response surfaces indexStatus PENDING_INDEX (the stale pre-PUT
     // PENDING_UPLOAD overridden) + polling note; lifecycle status untouched.
@@ -1710,6 +1712,59 @@ test('document_ingest file mode reads + uploads + returns indexStatus PENDING_IN
     globalThis.fetch = originalFetch;
     await unlink(tmpFile).catch(() => {});
   }
+});
+
+test('document_ingest file mode sends the header the upload response requires on the PUT', async () => {
+  // The presigned URL's signature can cover a conditional-write header; a PUT without it is
+  // rejected by S3. The header name and value come from the response, never a fixed name.
+  const tmpFile = join(tmpdir(), `mcp-ingest-header-test-${process.pid}.txt`);
+  await writeFile(tmpFile, 'file body bytes');
+
+  const fetchCalls: Array<{ url: string; init?: RequestInit }> = [];
+  const originalFetch = globalThis.fetch;
+  // @ts-expect-error — test override.
+  globalThis.fetch = async (input: string, init?: RequestInit) => {
+    fetchCalls.push({ url: String(input), init });
+    return { ok: true, status: 200, statusText: 'OK', text: async () => '' } as Response;
+  };
+
+  try {
+    const client = {
+      documents: {
+        uploadDocument: async () => ({
+          id: 'doc_uploaded',
+          uploadUrl: 'https://s3.example/presigned?sig=x',
+          requiredHeaderName: 'If-None-Match',
+          requiredHeaderValue: '*',
+        }),
+      },
+    } as never;
+    const tool = documentIngest({ client, log, transport: 'stdio', ingestRoot: tmpdir() });
+    const r = await tool.handler({ title: 'My File', filePath: tmpFile }, {});
+    assert.ok(!r.isError, `must not error: ${JSON.stringify(r)}`);
+
+    assert.equal(fetchCalls.length, 1);
+    assert.deepEqual(fetchCalls[0].init?.headers, {
+      'Content-Type': 'text/plain',
+      'If-None-Match': '*',
+    });
+  } finally {
+    globalThis.fetch = originalFetch;
+    await unlink(tmpFile).catch(() => {});
+  }
+});
+
+test('presignedUploadHeaders reads the header from the response and sends none when it is absent', () => {
+  assert.deepEqual(
+    presignedUploadHeaders({ requiredHeaderName: 'If-Match', requiredHeaderValue: '"etag-1"' }),
+    { 'If-Match': '"etag-1"' },
+  );
+  assert.deepEqual(presignedUploadHeaders({ uploadUrl: 'https://x/y' }), {});
+  assert.deepEqual(presignedUploadHeaders({ requiredHeaderName: '', requiredHeaderValue: '*' }), {});
+  assert.deepEqual(presignedUploadHeaders({ requiredHeaderName: 42, requiredHeaderValue: '*' }), {});
+  assert.deepEqual(presignedUploadHeaders({ requiredHeaderName: 'If-None-Match' }), {});
+  assert.deepEqual(presignedUploadHeaders(undefined), {});
+  assert.deepEqual(presignedUploadHeaders(null), {});
 });
 
 test('document_ingest file mode infers MIME from extension', async () => {

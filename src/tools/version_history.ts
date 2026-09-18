@@ -39,6 +39,8 @@ const versionHistory: ToolFactory = ({ client, log }) => ({
     '`nextCursor` back as `startFrom` to page through older entries. Entities without audit history (untyped) ' +
     'return an empty trail. Read-only.',
   inputSchema,
+  // A pure read — never creates, modifies, or deletes anything server-side.
+  annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true },
   handler: async (args): Promise<ToolResult> => {
     const resourceType = args.resourceType as 'record' | 'document';
     const id = args.id as string;

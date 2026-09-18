@@ -69,6 +69,8 @@ const folderQuery: ToolFactory = ({ client, log }) => ({
     'can accept the larger page); a non-null `nextCursor` means more remain — pass it back as `startFrom` to ' +
     'page through all folders. Get mode returns the single folder object.',
   inputSchema,
+  // A pure read — never creates, modifies, or deletes anything server-side.
+  annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true },
   handler: async (args): Promise<ToolResult> => {
     const id = args.id as string | undefined;
     try {

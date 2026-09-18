@@ -66,6 +66,10 @@ const recordUpdate: ToolFactory = ({ client, log }) => ({
     '(the version you last read) for safe concurrent edits — a stale update is refused (409). Use `status` ' +
     'to archive without deleting. Requires the key to allow records:u.',
   inputSchema,
+  // A JSON Merge Patch — overwrites the fields it names, so it can destroy a prior field
+  // value the caller did not mean to lose. Re-applying the same patch converges to the
+  // same state, so it is idempotent.
+  annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true },
   handler: async (args): Promise<ToolResult> => {
     const id = args.id as string | undefined;
     const externalId = args.externalId as string | undefined;

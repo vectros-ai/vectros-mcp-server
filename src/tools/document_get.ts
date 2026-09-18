@@ -98,6 +98,8 @@ const documentGet: ToolFactory = ({ client, log }) => ({
     'you whether the content is still findable — e.g. TEXT_INDEX_FAILED / VECTOR_LIMIT_EXCEEDED (one leg ' +
     'still serves it) vs INDEXING_FAILED (not findable by search at all). Branch on `code`, not on the message.',
   inputSchema,
+  // A pure read — never creates, modifies, or deletes anything server-side.
+  annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true },
   handler: async (args): Promise<ToolResult> => {
     const documentId = args.documentId as string | undefined;
     const externalId = args.externalId as string | undefined;

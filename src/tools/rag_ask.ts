@@ -136,6 +136,15 @@ const ragAsk: ToolFactory = ({ client, log }) => ({
     'progress notifications keep the call alive during the 30-45s generation window. ' +
     'Inference runs in-perimeter against AWS Bedrock — PHI never leaves the BAA boundary.',
   inputSchema,
+  // NOT a pure read: this call reserves an atomic hold against the caller's prepaid inference
+  // balance before generation starts, then debits it on completion — a real financial side
+  // effect that can trigger a configured auto-recharge against the tenant's card.
+  // `readOnlyHint:true` would let a host
+  // skip a confirmation prompt on a call with real, unbounded-under-retry spend; ordinary reads
+  // that merely meter usage stay `readOnlyHint:true` (hybrid_search has no inference-cost leg),
+  // but a call that can debit a balance and possibly charge a card is a different class. Not
+  // idempotent either: every repeat charges again, and generation is non-deterministic.
+  annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false },
   handler: async (args, extra): Promise<ToolResult> => {
     // Same local rejection as hybrid_search: the pair is mutually exclusive server-side, and
     // answering it here costs the agent no round trip and names both fields.

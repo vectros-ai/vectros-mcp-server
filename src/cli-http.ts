@@ -56,19 +56,21 @@ async function main(): Promise<void> {
   if (notice) log[notice.level]({ alias: notice.alias }, notice.message);
   if (!apiKey) {
     log.fatal({ reason: resolved.reason }, noKeyMessage(resolved));
-    process.exit(1);
+    process.exitCode = 1;
+    return;
   }
   const apiBaseUrl = process.env.VECTROS_API_BASE_URL;
 
   // Validate any env-supplied base URL BEFORE the server attaches the API key
-  // (R1 F-06a) — see cli.ts for the credential-exfil rationale.
+  // — see cli.ts for the credential-exfil rationale.
   if (apiBaseUrl !== undefined) {
     try {
       validateBaseUrl(apiBaseUrl, { warn: (m) => log.warn(m) });
     } catch (err) {
       const msg = err instanceof InvalidBaseUrlError ? err.message : String(err);
       log.fatal({ err: msg }, 'invalid VECTROS_API_BASE_URL');
-      process.exit(1);
+      process.exitCode = 1;
+      return;
     }
   }
 
@@ -86,7 +88,8 @@ async function main(): Promise<void> {
 
   if (port !== undefined && (!Number.isFinite(port) || port < 1 || port > 65535)) {
     log.fatal({ port: process.env.VECTROS_MCP_HTTP_PORT }, 'invalid VECTROS_MCP_HTTP_PORT (must be 1-65535)');
-    process.exit(1);
+    process.exitCode = 1;
+    return;
   }
 
   // Refuse to bind a non-loopback host without a bearer token: that is
@@ -102,7 +105,8 @@ async function main(): Promise<void> {
         'reach this port could call Vectros with your credentials. Set a bearer token, or set ' +
         'VECTROS_MCP_HTTP_ALLOW_INSECURE=1 to override (NOT recommended).',
     );
-    process.exit(1);
+    process.exitCode = 1;
+    return;
   }
 
   let tools: ToolName[] | undefined;
@@ -110,7 +114,8 @@ async function main(): Promise<void> {
     tools = parseToolsEnv(process.env.VECTROS_MCP_TOOLS);
   } catch (err) {
     log.fatal({ err: String(err) }, 'invalid VECTROS_MCP_TOOLS');
-    process.exit(1);
+    process.exitCode = 1;
+    return;
   }
 
   const skipFlag = (process.env.VECTROS_MCP_SKIP_PING_VALIDATION ?? '').toLowerCase();
@@ -132,9 +137,16 @@ async function main(): Promise<void> {
     } else {
       log.fatal({ err: String(err) }, 'startup failed');
     }
-    process.exit(1);
+    process.exitCode = 1;
+    return;
   }
 
+  // See cli.ts for the full account of why this is registered AFTER a
+  // successful startHttpTransport() and not before — the OWNER-RULED design
+  // decision, and why the seemingly-simpler "register early, make
+  // shutdown() exitCode-safe" alternative doesn't work (the /v1/ping fetch
+  // startHttpTransport awaits internally has no timeout/abort, so that
+  // alternative trades this exact crash for a possible silent hang).
   let handle: Awaited<ReturnType<typeof startHttpTransport>>;
   try {
     handle = await startHttpTransport({
@@ -148,9 +160,11 @@ async function main(): Promise<void> {
     });
   } catch (err) {
     log.fatal({ err: String(err) }, 'failed to start HTTP transport');
-    process.exit(2);
+    process.exitCode = 2;
+    return;
   }
 
+  // process.exit() here is intentional, not part of the exit-code fix above — see cli.ts.
   const shutdown = async (signal: string) => {
     log.info({ signal }, 'shutdown requested');
     try {

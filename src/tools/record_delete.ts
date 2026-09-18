@@ -23,6 +23,10 @@ const recordDelete: ToolFactory = ({ client, log }) => ({
     'Permanently delete a record by id (leaves a tombstone). Requires the key to allow records:d — a key ' +
     'without it gets a permission error. To archive without deleting, use record_update to set status instead.',
   inputSchema,
+  // Deletes (leaves a tombstone server-side, but the record is gone from every normal
+  // read path). Idempotent in the standard REST sense: the end state ("this id no longer
+  // resolves") is the same whether this is the first delete or a repeat of one.
+  annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true },
   handler: async (args): Promise<ToolResult> => {
     const id = args.id as string;
     try {

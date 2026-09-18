@@ -112,6 +112,8 @@ const documentQuery: ToolFactory = ({ client, log }) => ({
     'pass it back as `startFrom` to page. Mode is auto-detected. ' +
     'Use document_get for the full text/download URL of one document.',
   inputSchema,
+  // A pure read — never creates, modifies, or deletes anything server-side.
+  annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true },
   handler: async (args): Promise<ToolResult> => {
     const limit = (args.limit as number | undefined) ?? MCP_DEFAULT_LIMIT;
     const field = args.field as string | undefined;

@@ -52,6 +52,9 @@ const folderDelete: ToolFactory = ({ client, log }) => ({
     'without it gets a permission error. Protected folders (e.g. a context root) cannot be deleted at ' +
     'all, however empty.',
   inputSchema,
+  // Deletes. Idempotent in the standard REST sense: the end state ("this id no longer
+  // resolves") is the same whether this is the first delete or a repeat of one.
+  annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true },
   handler: async (args): Promise<ToolResult> => {
     const id = args.id as string;
     try {

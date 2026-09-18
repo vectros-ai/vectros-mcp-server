@@ -52,6 +52,8 @@ const recordBatchGet: ToolFactory = ({ client, log }) => ({
     "id not present in `data` — so you can tell a partial result from a complete one. As with record_get, " +
     'an oversized payload is truncated into a labelled `payloadPreview` rather than shipped whole.',
   inputSchema,
+  // A pure read — never creates, modifies, or deletes anything server-side.
+  annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true },
   handler: async (args): Promise<ToolResult> => {
     const ids = args.ids as string[];
     try {

@@ -22,6 +22,9 @@ const documentDelete: ToolFactory = ({ client, log }) => ({
     'documents:d — a key without it gets a permission error. To archive without deleting, use ' +
     'document_update to set status: "ARCHIVED" instead (recoverable, and needs no delete authority).',
   inputSchema,
+  // Deletes. Idempotent in the standard REST sense: the end state ("this id no longer
+  // resolves") is the same whether this is the first delete or a repeat of one.
+  annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true },
   handler: async (args): Promise<ToolResult> => {
     const documentId = args.documentId as string;
     try {

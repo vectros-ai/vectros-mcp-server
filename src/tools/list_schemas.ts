@@ -69,6 +69,8 @@ const listSchemas: ToolFactory = ({ client, log }) => ({
     'Filter with `surface` (record/document/user/entity — e.g. only document types), `recordType` (resolve ' +
     'one schema by its type name), or `userId`/`scope`; default returns everything the credential can see.',
   inputSchema,
+  // A pure read — never creates, modifies, or deletes anything server-side.
+  annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true },
   handler: async (args): Promise<ToolResult> => {
     const userId = args.userId as string | undefined;
     const scope = args.scope as string | undefined;

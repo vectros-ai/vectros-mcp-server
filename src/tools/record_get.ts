@@ -48,6 +48,8 @@ const recordGet: ToolFactory = ({ client, log }) => ({
     'content is still searchable (e.g. VECTOR_LIMIT_EXCEEDED keeps keyword search vs INDEXING_FAILED = not ' +
     'findable at all) — branch on the `code`, not the message.',
   inputSchema,
+  // A pure read — never creates, modifies, or deletes anything server-side.
+  annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true },
   handler: async (args): Promise<ToolResult> => {
     const id = args.id as string | undefined;
     const externalId = args.externalId as string | undefined;

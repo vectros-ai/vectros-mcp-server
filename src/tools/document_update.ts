@@ -95,6 +95,10 @@ const documentUpdate: ToolFactory = ({ client, log }) => ({
     'recoverable) and `status: "ACTIVE"` to restore it. Pass `expectedVersion` (the version you last read) ' +
     'for safe concurrent edits — a stale update is refused (409). Requires the key to allow documents:u.',
   inputSchema,
+  // A JSON Merge Patch — overwrites the fields it names, so it can destroy a prior field
+  // value the caller did not mean to lose. Re-applying the same patch converges to the
+  // same state, so it is idempotent.
+  annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true },
   handler: async (args): Promise<ToolResult> => {
     const documentId = args.documentId as string | undefined;
     const externalId = args.externalId as string | undefined;

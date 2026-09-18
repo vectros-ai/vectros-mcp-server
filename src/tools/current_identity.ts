@@ -63,6 +63,8 @@ const currentIdentity: ToolFactory = ({ log, apiKey, environment }) => ({
     "Use this when the user asks 'what can you do here?', 'what tenant am I in?', or 'what version is " +
     "this?'. Calls GET /v1/ping under the hood.",
   inputSchema,
+  // A pure read (/v1/ping) — never creates, modifies, or deletes anything server-side.
+  annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true },
   handler: async (): Promise<ToolResult> => {
     try {
       const identity = await resolveIdentity({ log, apiKey, environment });

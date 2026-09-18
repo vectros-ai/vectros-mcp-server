@@ -3,6 +3,110 @@
 All notable changes to `@vectros-ai/mcp-server` are documented here.
 This project adheres to [Semantic Versioning](https://semver.org).
 
+## 0.17.1 — 2026-09-17
+
+### Security
+
+- **README no longer instructs committing a live API key.** Both "Configure manually" examples
+  (Claude Desktop and Claude Code) led with a JSON snippet embedding a real `ssk_live_...` value,
+  and the Claude Code section explicitly said to commit the resulting `.mcp.json` "to share the
+  server with the repo" — on the page that renders as this package's npm landing page. Both
+  sections now lead with the keyring-based config (no `env` block, no secret in the file — the
+  server resolves the key from the local `vectros` CLI keyring, same as before) and explicitly warn
+  against committing a config that does carry a real key.
+
+### Added
+
+- **All 23 tools now declare MCP annotations** (`readOnlyHint`/`destructiveHint`/`idempotentHint`)
+  in the actual `tools/list` response, not just their own source — a host previously had nothing
+  to gate a confirmation prompt on, so every tool looked alike including the deletes and the
+  batch-write. Annotated per tool against what its handler actually calls, not its name:
+  - Reads with no real-money leg (`hybrid_search`, `record_get`/`_query`/`_batch_get`,
+    `document_get`/`_query`, `folder_query`, `list_schemas`, `current_identity`,
+    `lookup_principal`, `version_history`) are `readOnlyHint: true`.
+  - `rag_ask` and `document_ask` are **not** read-only: both reserve an atomic hold against the
+    caller's prepaid inference balance before generation and debit it on completion, which can
+    trigger a configured auto-recharge against a payment method on file. Also not idempotent —
+    every repeat charges again, and generation is non-deterministic.
+  - `record_create`, `document_ingest`, and `record_batch_write` each dedupe by an OPTIONAL
+    `externalId` — supplying it makes a retry converge, omitting it does not — so all three are
+    annotated for that less-safe default (`idempotentHint: false`), not the safer opt-in;
+    `document_ingest` and `record_batch_write` are additionally flagged destructive because their
+    `upsert:true` paths overwrite existing content.
+  - `folder_create` is idempotent **only when the caller supplies `slug` explicitly** — an omitted
+    slug is derived through a collision-probing suffix loop that returns only a value already
+    proved free, so a retry with no `slug` creates a new sibling folder rather than converging.
+    Annotated `idempotentHint: false` for that default, the same standard as the optional-key
+    create tools above.
+  - The three `*_update` tools (JSON Merge Patch) and the three `*_delete` tools are all flagged
+    destructive.
+
+  Verified against the real, over-the-wire `tools/list` response from the compiled binary, not the
+  source that builds it.
+
+### Fixed
+
+- **`document_ingest` in file mode now works against an API that makes presigned upload URLs
+  single-use.** Such an API bakes a conditional-write header into the upload URL's signature and
+  names it in the upload response (`requiredHeaderName` / `requiredHeaderValue`); the tool's PUT
+  omitted it, so storage rejected the upload with a 403 and the tool reported the document as
+  created but incomplete. The tool now sends whatever header the response names, and no extra
+  header when the response names none, so it works against API versions on either side of the
+  change.
+
+- **A failed startup could abort the whole process with a native Windows crash instead of the
+  server's own exit code.** Both entry points (`vectros-mcp-server`, `vectros-mcp-server-http`)
+  end EVERY startup failure path — a missing/invalid credential, a bad `--` env config, a rejected
+  `GET /v1/ping` check (enabled by default; `VECTROS_MCP_SKIP_PING_VALIDATION` to opt out) — with a
+  raw `process.exit()`. On Windows, an async operation still settling (a `fetch` for the ping check;
+  an `execFile` spawn out to the local CLI keyring helper for credential resolution) when
+  `process.exit()` runs can race libuv and abort the process, printing an `Assertion failed` line
+  and replacing the real exit code with `127` — the same class of defect fixed in `@vectros-ai/cli`
+  around the same time. Every startup-failure exit in both files now sets `process.exitCode` and
+  lets the event loop drain naturally, instead of hard-exiting.
+
+  This needed one adjustment `@vectros-ai/cli`'s equivalent fix didn't: both entry points register
+  `SIGINT`/`SIGTERM` handlers for graceful shutdown, and Node keeps a process alive for as long as
+  either signal has a registered listener. Registering them before the connect attempt would mean a
+  failed connect never actually exits under the new idiom — it hangs forever instead, waiting for a
+  signal that will never come. Both files register those handlers only after a successful connect,
+  so a failed startup still exits promptly; the alternative (register early, make the shutdown
+  handler itself exit-code-safe too) doesn't work here, because the ping check's underlying fetch
+  has no timeout and no cancellation — that path trades the crash for a possible silent hang on a
+  stuck connection instead of fixing it.
+
+- **Two integration tests carried an internal issue number and internal review-process wording**
+  (a bare tracker reference in two test names/comments describing the exit-code fix above, and one
+  comment describing a defect an earlier internal review pass had caught). This package's GitHub
+  source mirror ships `tests/` verbatim, so both leaked into the public repo. Reworded to
+  self-contained descriptive text; no behavioral change.
+
+- **Four more source comments carried an internal workstream/finding code**, on the base-URL
+  SSRF/credential-exfil guard in `cli.ts`, `cli-http.ts`, `server.ts`, and its test — found on a
+  later sweep with a wider scan pattern. The substantive rationale was already self-contained in
+  each comment; only the bare internal code was dropped. No behavioral change.
+
+- **One more source comment on that same base-URL guard named a sibling package's file by
+  monorepo-relative path** (`base-url.ts`'s own doc comment, describing that the same guard is
+  ported into another package's CLI) — found by a post-merge audit. Reworded to describe the
+  sibling generically. No behavioral change.
+
+- **One source comment named an internal backend class by name** (`record_query.ts`, describing
+  how a composite field's identity is joined on the backend). Reworded to describe the mechanism
+  without the class name. No behavioral change.
+
+### Docs
+
+- **`current_identity`'s capability-gap list now includes `trigger-control-plane-grant`**, the
+  sixth named `granted_capabilities` value, alongside the five it already tracked. **`document_get`'s
+  `downloadUrl` description now notes the platform always forces `attachment` disposition** on
+  download, so a caller expecting inline rendering of a safe type knows to expect a save prompt
+  instead. No behavior changed — both were description-only gaps.
+
+### Changed
+
+- **Dependency maintenance** — repinned the bundled `@vectros-ai/sdk` to `0.44.0`.
+
 ## 0.17.0 — 2026-09-07
 
 ### Added

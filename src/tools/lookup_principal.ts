@@ -128,6 +128,8 @@ const lookupPrincipal: ToolFactory = ({ client, log }) => ({
     'one call when you can accept the payload); a non-null `nextCursor` means more remain — pass it back ' +
     'as `startFrom`. Read-only — does not create or modify identities.',
   inputSchema,
+  // A pure read — never creates, modifies, or deletes anything server-side.
+  annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true },
   handler: async (args): Promise<ToolResult> => {
     const kind = args.kind as string;
     const isUser = kind === 'user';

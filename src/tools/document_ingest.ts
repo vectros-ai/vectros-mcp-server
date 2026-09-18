@@ -273,6 +273,16 @@ const documentIngest: ToolFactory = ({ client, log, transport, ingestRoot }) => 
     'after indexing (search + file download keep working; text retrieval and document_ask do not). ' +
     'Text-mode bodies are always retained, so storeText is not accepted with `text`.',
   inputSchema,
+  // Creates by default, idempotent ONLY when the caller supplies `externalId` (optional,
+  // per the doc comment above) — re-ingest then returns the existing document rather than
+  // duplicating it. `externalId` is not required, so annotated for the less-safe default
+  // (omit it, and every call creates a new document), same standard applied to
+  // record_create/record_batch_write's identical optional-externalId shape. `upsert:true`
+  // is a further, real, named capability of this tool that OVERWRITES an existing
+  // document's content and re-indexes it — that path is destructive to the prior body, so
+  // this is flagged destructive rather than claiming create-only safety a caller can
+  // invoke past.
+  annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false },
   handler: async (args): Promise<ToolResult> => {
     const title = args.title as string;
     const text = args.text as string | undefined;
@@ -432,10 +442,11 @@ const documentIngest: ToolFactory = ({ client, log, transport, ingestRoot }) => 
       }
 
       // PUT bytes to presigned URL. No Authorization header (the URL
-      // carries its own signature via query params).
+      // carries its own signature via query params). Any header the upload
+      // response requires is part of that signature, so it is sent too.
       const putRes = await fetch(uploadUrl, {
         method: 'PUT',
-        headers: { 'Content-Type': fileType },
+        headers: { 'Content-Type': fileType, ...presignedUploadHeaders(upload) },
         body: bytes,
       });
 
@@ -485,3 +496,25 @@ const documentIngest: ToolFactory = ({ client, log, transport, ingestRoot }) => 
 });
 
 export default documentIngest;
+
+/**
+ * The extra header a presigned upload URL requires, as named by the upload response.
+ *
+ * The platform can bake an S3 conditional-write precondition (for example `If-None-Match: *`, which
+ * makes the URL single-use) into the URL's own signature. A PUT that omits that header, or changes
+ * its value, fails signature validation with a 403 before the bytes are accepted.
+ *
+ * Read from the response, never hard-coded, and only when the response carries a name: an API
+ * version that does not return these fields gets no extra header, exactly as before. Checked at
+ * runtime because the SDK version in use may predate the fields and so cannot type them.
+ */
+export function presignedUploadHeaders(response: unknown): Record<string, string> {
+  if (typeof response !== 'object' || response === null) return {};
+  const { requiredHeaderName, requiredHeaderValue } = response as {
+    requiredHeaderName?: unknown;
+    requiredHeaderValue?: unknown;
+  };
+  if (typeof requiredHeaderName !== 'string' || requiredHeaderName === '') return {};
+  if (typeof requiredHeaderValue !== 'string') return {};
+  return { [requiredHeaderName]: requiredHeaderValue };
+}

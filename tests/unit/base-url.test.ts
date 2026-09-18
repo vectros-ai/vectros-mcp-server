@@ -1,5 +1,5 @@
 /**
- * Base-URL validator tests (R1 F-06a) — mirrors the CLI guard. The MCP server
+ * Base-URL validator tests — mirrors the CLI guard. The MCP server
  * sends `Authorization: Bearer ${VECTROS_API_KEY}` to `${baseUrl}/v1/ping`, so
  * an attacker-supplied VECTROS_API_BASE_URL must not be honored.
  */

@@ -79,6 +79,34 @@ test('cli-http REFUSES to bind a non-loopback host with no bearer token (exit 1)
   assert.match(getStderr(), /refusing to bind/i);
 });
 
+test('cli-http exits 2 (not hangs) when startup ping validation fails (sibling of the CLI exit-race fix)', async () => {
+  // startHttpTransport internally awaits mcpServer.connect(), which awaits a
+  // GET /v1/ping when validateOnStart is true — the same "await a fetch, then
+  // fail" shape that raced libuv on Windows and corrupted the exit code in
+  // @vectros-ai/cli. Fixed the same way (process.exitCode instead of
+  // process.exit()), and only safe because the SIGINT/SIGTERM listeners are
+  // registered AFTER this point — see cli-http.ts's comment. The timeout
+  // guard is load-bearing: if that reordering were undone, this would hang
+  // for the full 5s and fail on a timeout, not report a wrong code.
+  const port = await getFreePort();
+  const { child, getStderr } = spawnHttp({
+    VECTROS_MCP_HTTP_PORT: String(port),
+    VECTROS_API_KEY: 'ssk_live_not-a-real-key', // real prefix, fake suffix — see resolve-key.ts: no local length/format check, so this reaches the real /v1/ping call and gets a genuine 403
+    VECTROS_MCP_SKIP_PING_VALIDATION: '', // must NOT skip — this is what we're testing
+  });
+  const code: number = await new Promise((resolve) => {
+    const t = setTimeout(() => {
+      child.kill('SIGKILL');
+      resolve(-1);
+    }, 5000);
+    child.once('exit', (c) => {
+      clearTimeout(t);
+      resolve(c ?? -1);
+    });
+  });
+  assert.equal(code, 2, `expected exit 2 (ping validation failure), got ${code}; stderr: ${getStderr()}`);
+});
+
 test('cli-http WITH a bearer token starts on a non-loopback host (healthz 200)', async () => {
   // The rescue case: the same non-loopback bind is allowed once a bearer token
   // is set. healthz is unauthenticated (probe-friendly), so it answers 200.

@@ -123,6 +123,29 @@ Precision is the pitch — what this server deliberately does *not* do:
 
 ## Configure manually (Claude Desktop or any MCP client)
 
+If `@vectros-ai/cli` is installed **globally** (`npm install -g @vectros-ai/cli`,
+not a one-off `npx` run — the server needs `vectros` to still be on `PATH`
+later, when IT runs, not just while bootstrap ran) and you've run
+`vectros bootstrap` with it, omit the `env` block entirely — the server
+resolves your key from the local `vectros` CLI keyring automatically (see
+[Credential resolution](#credential-resolution) below). `vectros login` alone
+does **not** do this — it stores a separate sign-in session, not this key —
+so `bootstrap` is the step that actually has to have run:
+
+```json
+{
+  "mcpServers": {
+    "vectros": {
+      "command": "npx",
+      "args": ["-y", "@vectros-ai/mcp-server"]
+    }
+  }
+}
+```
+
+No CLI installed, or a machine you can't log in on? Set the key directly
+instead:
+
 ```json
 {
   "mcpServers": {
@@ -136,34 +159,53 @@ Precision is the pitch — what this server deliberately does *not* do:
   }
 }
 ```
+
+This file lives under Claude Desktop's own per-user app-support directory,
+not a shared repo — but a real key pasted into it is still a live secret at
+rest: don't paste it into a chat, ticket, or screenshot with the value
+intact, and prefer the keyring form above whenever you can.
 
 Restart Claude Desktop. The agent now sees the Vectros tools and
 two resources as callable surfaces.
 
 ## Configure manually (Claude Code)
 
-Claude Code reads a project-scoped `.mcp.json` with the same shape — drop this
-at your project root (commit it to share the server with the repo):
+Claude Code reads a project-scoped `.mcp.json` with the same shape.
+**Never commit a real key into it** — `.mcp.json` is exactly the kind of file
+teams check in to share a project's tooling, and a live `ssk_*`/`sk_*` value
+inside it is a credential leak the moment it lands in git history, not just
+if the repo is public.
+
+The way to share this config safely: commit the entry with **no `env` block
+at all**, and let each developer's own `vectros` CLI keyring supply the key
+(see [Credential resolution](#credential-resolution) below — this is the
+same delegation `git credential` / `docker-credential-*` use). This needs
+each teammate to have `@vectros-ai/cli` installed **globally** and to have
+run `vectros bootstrap` with it — `npx`-ing the CLI once, or running
+`vectros login` alone (a separate sign-in session, not this key), leaves
+nothing on `PATH` or in the keyring for the server to find later:
 
 ```json
 {
   "mcpServers": {
     "vectros": {
       "command": "npx",
-      "args": ["-y", "@vectros-ai/mcp-server"],
-      "env": {
-        "VECTROS_API_KEY": "ssk_live_..."
-      }
+      "args": ["-y", "@vectros-ai/mcp-server"]
     }
   }
 }
 ```
 
-Or let Claude Code's CLI write it for you:
+Or let Claude Code's CLI write that keyring-based entry for you:
 
 ```bash
-claude mcp add vectros -e VECTROS_API_KEY=ssk_live_... -- npx -y @vectros-ai/mcp-server
+claude mcp add vectros -- npx -y @vectros-ai/mcp-server
 ```
+
+If a machine genuinely has no `vectros` CLI installed, you can pass the key
+directly with `-e VECTROS_API_KEY=ssk_live_...` — but then keep that config
+**local**: add `.mcp.json` to `.gitignore` first, rather than committing it
+with the key inside.
 
 Add `-e VECTROS_API_BASE_URL=https://api.staging.vectros.ai` for a non-production
 environment.
@@ -213,7 +255,7 @@ resolves to its main repo's `.mcp.json` — add and open from the same project.
 |---|---|
 | `document_ingest` | Create a document — inline text body OR local file upload (file mode is stdio-transport only). Idempotent by `externalId`; optional `schemaId` + `payload` for a typed, lookup-queryable document. |
 | `document_query` | Query documents by lookup field (equality / range / prefix, with `asc`/`desc` ordering) or list mode (filter by ownership + type). |
-| `document_get` | Fetch a document by id (metadata incl. lifecycle `status` + processing `indexStatus`; optional text truncated at ~8K tokens; optional presigned `downloadUrl` for file-backed documents). |
+| `document_get` | Fetch a document by id (metadata incl. lifecycle `status` + processing `indexStatus`; optional text truncated at ~8K tokens; optional presigned `downloadUrl` for file-backed documents — always forces a download, never inline rendering, regardless of file type). |
 | `document_update` | Patch a document's metadata / typed payload (deep-merged); archive/restore via `status` (`ARCHIVED` soft-retracts from search, `ACTIVE` restores); optimistic concurrency via `expectedVersion`. |
 | `document_delete` | Permanently delete a document by id (removes it and its indexed content). |
 
@@ -230,7 +272,7 @@ resolves to its main repo's `.mcp.json` — add and open from the same project.
 
 | Tool | What it does |
 |---|---|
-| `current_identity` | Describe the credential: tenantId, environment, principalType, principalKeyId, principalLabel, and (for scoped credentials) allowedActions + dataScope. Does **not** yet include `granted_capabilities` (`member-lifecycle` / `forensic-read` / `context-directory-read` / `delegate-mint`, as of API 0.40.0, joined by `delegate-principal-stamp` in 0.42.0) — a separate reach dimension a scope clause can carry that `/v1/ping` doesn't report yet, so allowedActions + dataScope may understate a credential's true reach. Also reports this server's own version and the bundled SDK version (`mcpServerVersion`, `sdkVersion`). |
+| `current_identity` | Describe the credential: tenantId, environment, principalType, principalKeyId, principalLabel, and (for scoped credentials) allowedActions + dataScope. Does **not** yet include `granted_capabilities` (`member-lifecycle` / `forensic-read` / `context-directory-read` / `delegate-mint`, as of API 0.40.0, joined by `delegate-principal-stamp` in 0.42.0 and `trigger-control-plane-grant` in 0.44.0) — a separate reach dimension a scope clause can carry that `/v1/ping` doesn't report yet, so allowedActions + dataScope may understate a credential's true reach. Also reports this server's own version and the bundled SDK version (`mcpServerVersion`, `sdkVersion`). |
 | `lookup_principal` | Resolve a user, or an identity entity in a namespace (`org`/`client`/any namespace you registered), by your own `externalId` (→ its Vectros UUID, for the ownership filters) or by a schema lookup field. Pass `contextId` to target a specific app context for a context-owned namespace. Read-only. |
 | `version_history` | Read the audit/version trail (CREATE/UPDATE/DELETE, with actor + diff) for one record or document. Read-only. |
 

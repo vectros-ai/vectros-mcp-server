@@ -8,6 +8,7 @@
  */
 import type { ZodRawShape } from 'zod';
 import type { VectrosClient } from '@vectros-ai/sdk';
+import type { ToolAnnotations } from '@modelcontextprotocol/sdk/types.js';
 import type { Logger } from '../log.js';
 
 /**
@@ -94,6 +95,16 @@ export interface ToolDefinition<S extends ZodRawShape = ZodRawShape> {
   description: string;
   inputSchema: S;
   handler: (args: Record<string, unknown>, extra: ToolExtra) => Promise<ToolResult>;
+  /**
+   * MCP tool-annotation hints (`readOnlyHint`/`destructiveHint`/`idempotentHint`/
+   * `openWorldHint`) — how a host decides which calls need confirmation before running.
+   * The spec is explicit that these are HINTS, not guarantees a client should trust from
+   * an untrusted server — but a wrong hint is worse than none: it teaches a host to skip
+   * confirmation on a call that actually writes or deletes. Every factory below sets this
+   * honestly, verified against what its own handler actually calls, not assumed from the
+   * tool's name.
+   */
+  annotations?: ToolAnnotations;
 }
 
 export interface ToolFactoryContext {

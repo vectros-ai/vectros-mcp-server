@@ -132,7 +132,7 @@ export class VectrosMCPServer {
       'authenticated against Vectros',
     );
 
-    // SDK client. Validate the base URL here too (R1 F-06a) — the CLI entry
+    // SDK client. Validate the base URL here too — the CLI entry
     // points validate before construction, but a programmatic embedder reaches
     // this directly; an unvalidated host would exfiltrate the API key via
     // /v1/ping. Throws InvalidBaseUrlError on a non-Vectros / insecure host.
@@ -232,6 +232,11 @@ export class VectrosMCPServer {
           // The server enforces it too (z.object(...).strict() below) so a raw JSON-RPC
           // call that skips client validation is still rejected — belt and suspenders.
           inputSchema: { ...zodShapeToJsonSchema(t.inputSchema), additionalProperties: false },
+          // Forwarded from the tool's own definition, not hand-copied here: adding an
+          // annotation to a tool factory does nothing for a client unless it also reaches
+          // this emitted list — the actual `tools/list` response a host reads, not the
+          // source that builds it.
+          ...(t.annotations ? { annotations: t.annotations } : {}),
         })),
       }) as unknown as never,
     );

@@ -167,6 +167,15 @@ const recordBatchWrite: ToolFactory = ({ client, log }) => ({
     'not_committed (this item was fine but an all_or_nothing batch was aborted by a different item, so ' +
     'resubmitting with that one fixed writes this one unchanged).',
   inputSchema,
+  // Creates by default, and can overwrite existing records as a FULL replacement when
+  // `upsert:true` is passed (destructive to whatever fields the old version carried and
+  // this call omits). Idempotent ONLY when every item supplies `externalId` (optional,
+  // per its own field doc above) — re-submitting then converges, with or without
+  // `upsert:true`. `externalId` is not required, so annotated for the less-safe default:
+  // an item with no `externalId` at all has no dedup key, and a resubmit creates a second
+  // record for it regardless of `upsert`. Same standard applied to record_create/
+  // document_ingest's identical optional-externalId shape.
+  annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false },
   handler: async (args): Promise<ToolResult> => {
     const items = args.items as Array<{
       type: string;

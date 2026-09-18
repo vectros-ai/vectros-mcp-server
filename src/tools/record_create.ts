@@ -76,6 +76,13 @@ const recordCreate: ToolFactory = ({ client, log }) => ({
     'by `externalId`. Requires the key to allow records:c (and records:r to receive the existing record ' +
     'on a collision).',
   inputSchema,
+  // Creates, never modifies or deletes an existing record. Idempotent ONLY when the caller
+  // supplies `externalId` (optional, per the doc comment above) — re-creating with the same
+  // one returns the existing record rather than duplicating it. `externalId` is not required,
+  // so annotated for the less-safe default (omit it, and a retry creates a second record),
+  // not the safer opt-in — same standard applied to record_batch_write, which has the
+  // identical optional-externalId shape.
+  annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false },
   handler: async (args): Promise<ToolResult> => {
     const type = args.type as string;
     try {

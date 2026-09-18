@@ -222,6 +222,8 @@ const recordQuery: ToolFactory = ({ client, log }) => ({
     'returns records grouped by the unspecified fields, ordered within each group. Mode is auto-detected ' +
     'from the arguments present.',
   inputSchema,
+  // A pure read — never creates, modifies, or deletes anything server-side.
+  annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true },
   handler: async (args): Promise<ToolResult> => {
     const limit = (args.limit as number | undefined) ?? MCP_DEFAULT_LIMIT;
     const type = args.type as string | undefined;
@@ -319,7 +321,7 @@ const recordQuery: ToolFactory = ({ client, log }) => ({
         const fieldNames = field.split(',').map((f) => f.trim()).filter(Boolean);
         // Forward the NORMALIZED (trimmed, re-joined) field, not the raw string. A
         // composite's declared identity on the backend is `fieldNames.join(',')` exactly
-        // (RecordSchemaDB's COMPOSITE_SEP) — forwarding an unnormalized "status, area" (a
+        // (the backend's own composite-field separator) — forwarding an unnormalized "status, area" (a
         // stray space) or "status,,area" would parse to the right leg count HERE but fail
         // `lookupFieldConfig` lookup on the backend, surfacing as a confusing
         // single-field-vs-N-values error instead of the real problem.
