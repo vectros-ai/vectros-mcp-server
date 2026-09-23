@@ -52,13 +52,13 @@ const MAX_ROWS = 1_000_000;
  * FALSY `nextCursor` (null / undefined / empty string) — never on an empty
  * `data` array. That distinction matters: terminating on page *fullness*
  * instead of cursor *nullity* is exactly the bug that infinite-loops the old
- * `getAllResults()`-style iterators under the 0.23 null-cursor semantics
+ * iterator-style pagers under the 0.23 null-cursor semantics
  * (a non-full final page legitimately carries a null cursor).
  *
  * Bounded on BOTH pages and accumulated rows, not rows alone. A row-only
  * guard (`if (all.length > MAX) throw`) is unreachable on exactly the
  * pathology it exists for: a page can come back EMPTY while `nextCursor`
- * stays live — a per-page `filterByDataScope` post-filter dropping every row,
+ * stays live — a per-page data-scope post-filter dropping every row,
  * or a partition scanned with no matches — so the row count never grows and
  * never trips. The loop advances on the CURSOR; the guard must bound the
  * thing the loop actually advances on. Fails closed (throws) rather than

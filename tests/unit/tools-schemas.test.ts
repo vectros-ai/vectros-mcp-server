@@ -699,7 +699,7 @@ test('the date-window params are described as CREATION time — the platform con
   // Two different fields, and an earlier revision of this branch conflated them:
   //   • a hit's RETURNED createdAt is the search-index timestamp (later for a re-indexed item);
   //   • the createdAfter/createdBefore FILTERS are documented "created at or after" and the
-  //     platform deliberately preserves that — applyTimeRange uses the row's true, unchanging
+  //     platform deliberately preserves that — the time-window filter uses the row's true, unchanging
   //     createdAt for anything past its first index, and only borrows the index time AT first
   //     index as a bounded clock-skew allowance.
   // Describing the filters as index-time was backwards for exactly the re-index case it named,
@@ -723,8 +723,8 @@ test('the date-window params are described as CREATION time — the platform con
 });
 
 test('record_batch_write states the best_effort intra-batch duplicate behaviour, not an absolute', () => {
-  // duplicate_in_batch is raised by the transactional path only — writeBestEffort opens no scope,
-  // so claimIntraScopeUniqueness early-returns and the second item matches what the first wrote
+  // duplicate_in_batch is raised by the transactional path only — the best_effort path opens no scope,
+  // so the intra-scope uniqueness claim early-returns and the second item matches what the first wrote
   // and reports `updated`. Claiming a bare "refused as a conflict" would tell an agent a
   // duplicated spreadsheet key is caught when by default it silently collapses two rows into one.
   const d = tools.record_batch_write.description;

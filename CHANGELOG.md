@@ -3,6 +3,15 @@
 All notable changes to `@vectros-ai/mcp-server` are documented here.
 This project adheres to [Semantic Versioning](https://semver.org).
 
+## 0.17.2 — 2026-09-22
+
+### Changed
+
+- **Repinned the bundled `@vectros-ai/sdk` to `0.45.0`.** No tool behavior changes: 0.45.0's one
+  surface addition (trusted-issuer proof-of-control) is identity/access administration, which stays
+  off this package's tool surface by the same standing exclusion documented for issuer update/suspend
+  in earlier releases.
+
 ## 0.17.1 — 2026-09-17
 
 ### Security

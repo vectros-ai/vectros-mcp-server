@@ -323,7 +323,7 @@ const recordQuery: ToolFactory = ({ client, log }) => ({
         // composite's declared identity on the backend is `fieldNames.join(',')` exactly
         // (the backend's own composite-field separator) — forwarding an unnormalized "status, area" (a
         // stray space) or "status,,area" would parse to the right leg count HERE but fail
-        // `lookupFieldConfig` lookup on the backend, surfacing as a confusing
+        // the backend's lookup-field lookup, surfacing as a confusing
         // single-field-vs-N-values error instead of the real problem.
         const normalizedField = fieldNames.join(',');
         const isCompositeField = fieldNames.length > 1;
