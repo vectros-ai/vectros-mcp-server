@@ -86,7 +86,7 @@ Prefer to wire it up by hand? See **Configure manually** below.
 |---|---|---|
 | **Claude Desktop** | [Desktop Extension (`.mcpb`)](https://github.com/vectros-ai/vectros-mcp-server/releases/latest/download/vectros.mcpb) — double-click, paste your key | [JSON snippet](#configure-manually-claude-desktop-or-any-mcp-client) |
 | **Cursor** | [![Add to Cursor](https://cursor.com/deeplink/mcp-install-dark.svg)](https://cursor.com/install-mcp?name=vectros&config=eyJjb21tYW5kIjoibnB4IiwiYXJncyI6WyIteSIsIkB2ZWN0cm9zLWFpL21jcC1zZXJ2ZXIiXSwiZW52Ijp7IlZFQ1RST1NfQVBJX0tFWSI6IiJ9fQ%3D%3D) | `.cursor/mcp.json`, same shape as below |
-| **VS Code** | [![Install in VS Code](https://img.shields.io/badge/VS_Code-Install-0098FF?logo=visualstudiocode&logoColor=white)](https://insiders.vscode.dev/redirect/mcp/install?name=vectros&config=%7B%22command%22%3A%22npx%22%2C%22args%22%3A%5B%22-y%22%2C%22%40vectros-ai%2Fmcp-server%22%5D%2C%22env%22%3A%7B%22VECTROS_API_KEY%22%3A%22%22%7D%7D) | `.vscode/mcp.json`, same shape |
+| **VS Code** | [![Install in VS Code](https://img.shields.io/badge/VS_Code-Install-0098FF?logo=visualstudiocode&logoColor=white)](https://insiders.vscode.dev/redirect/mcp/install?name=vectros&config=%7B%22command%22%3A%22npx%22%2C%22args%22%3A%5B%22-y%22%2C%22%40vectros-ai%2Fmcp-server%22%5D%2C%22env%22%3A%7B%22VECTROS_API_KEY%22%3A%22%22%7D%7D) | `.vscode/mcp.json`, the same entry under a top-level `servers` key |
 | **Claude Code** | `claude mcp add` (below) | [project `.mcp.json`](#configure-manually-claude-code) |
 | **Cline / Continue** | — | same JSON snippet as Claude Desktop |
 | **Smithery** | `npx -y @smithery/cli install @vectros-ai/mcp-server` | — |
@@ -207,8 +207,8 @@ directly with `-e VECTROS_API_KEY=ssk_live_...` — but then keep that config
 **local**: add `.mcp.json` to `.gitignore` first, rather than committing it
 with the key inside.
 
-Add `-e VECTROS_API_BASE_URL=https://api.staging.vectros.ai` for a non-production
-environment.
+Add `-e VECTROS_API_BASE_URL=<your environment's API base URL>` to point the server at a
+different environment.
 
 **Load it into a session by restarting.** A Claude Code session that was
 already open when you added the server won't pick it up mid-session — fully
@@ -219,12 +219,11 @@ instead. Config is keyed by the **git common root**, so a linked worktree
 resolves to its main repo's `.mcp.json` — add and open from the same project.
 
 > **Windows note:** if your `.npmrc` (or a global npm config) points the
-> `@vectros-ai` scope at a private registry, a bare `npx -y @vectros-ai/mcp-server`
-> can resolve an unexpected internal build there instead of the public
-> release — and an internal build is not guaranteed to run on Windows. If the
-> command above fails to start, either remove the scoped-registry override
-> for a plain `npx` run, or pin an explicit version (`npx -y
-> @vectros-ai/mcp-server@<version>`) known to work.
+> `@vectros-ai` scope at another registry, a bare `npx -y @vectros-ai/mcp-server`
+> can resolve a build other than the public release. If the command above fails
+> to start, either remove the scoped-registry override for a plain `npx` run, or
+> pin an explicit version (`npx -y @vectros-ai/mcp-server@<version>`) known to
+> work.
 
 ## Tools (23 tools)
 
@@ -233,8 +232,8 @@ resolves to its main repo's `.mcp.json` — add and open from the same project.
 | Tool | What it does |
 |---|---|
 | `hybrid_search` | Hybrid BM25 + dense search across the tenant's indexed content (records + documents). Narrow by ownership (`scope` for one dimension, `scopeFilters` for several at once — e.g. one client within one org), folder, type, metadata filters, a created date window, and keyword-precision (`textMode`) / relevance floors. Returns the indexed projection of each hit. |
-| `rag_ask` | Ask a question grounded against the indexed corpus. Scope retrieval (ownership — `scope` or multi-dimension `scopeFilters` — / folder / type / metadata filters / date window) and steer generation (`instructions` / `temperature`). Streaming generation aggregated; progress notifications keep the call alive for the generation window. |
-| `document_ask` | Ask a question grounded against a single document. Same aggregation + progress-notification shape as `rag_ask`. |
+| `rag_ask` | Ask a question grounded against the indexed corpus. Scope retrieval (ownership — `scope` or multi-dimension `scopeFilters` — / folder / type / metadata filters / date window) and steer generation (`instructions` / `temperature`). Streaming generation aggregated; progress notifications keep the call alive for the generation window. Optional `providerAlias` routes one call through your own model provider (see below). |
+| `document_ask` | Ask a question grounded against a single document. Same aggregation + progress-notification shape as `rag_ask`, including the optional `providerAlias`. |
 
 **Records** (structured, schema-validated data)
 
@@ -253,8 +252,8 @@ resolves to its main repo's `.mcp.json` — add and open from the same project.
 
 | Tool | What it does |
 |---|---|
-| `document_ingest` | Create a document — inline text body OR local file upload (file mode is stdio-transport only). Idempotent by `externalId`; optional `schemaId` + `payload` for a typed, lookup-queryable document. |
-| `document_query` | Query documents by lookup field (equality / range / prefix, with `asc`/`desc` ordering) or list mode (filter by ownership + type). |
+| `document_ingest` | Create a document — inline text body OR local file upload (file mode is stdio-transport only). Idempotent by `externalId`; optional `schemaId` + `payload` for a typed, lookup-queryable document. An `externalId` with no `schemaId` is refused by platform 0.46.0 and later unless you also pass `confirmUntyped: true`. |
+| `document_query` | Query documents by lookup field (equality / range / prefix, with `asc`/`desc` ordering) or list mode (filter by folder and ownership). |
 | `document_get` | Fetch a document by id (metadata incl. lifecycle `status` + processing `indexStatus`; optional text truncated at ~8K tokens; optional presigned `downloadUrl` for file-backed documents — always forces a download, never inline rendering, regardless of file type). |
 | `document_update` | Patch a document's metadata / typed payload (deep-merged); archive/restore via `status` (`ARCHIVED` soft-retracts from search, `ACTIVE` restores); optimistic concurrency via `expectedVersion`. |
 | `document_delete` | Permanently delete a document by id (removes it and its indexed content). |
@@ -279,6 +278,19 @@ resolves to its main repo's `.mcp.json` — add and open from the same project.
 All 23 tools wrap published Vectros HTTP API endpoints. JSON
 responses are what the agent sees as tool output. Per-call cost
 surfaces via the `usage` field on inference responses.
+
+### Routing a call through your own model provider
+
+`rag_ask` and `document_ask` take an optional `providerAlias`: the alias of a model provider config your Vectros
+account has activated. When you pass it, that one call is served by your own provider instead of the
+platform-hosted default, and `model` then names a model on your provider's own id space (it falls back to that
+provider config's default model when omitted). The server forwards `providerAlias` only when you supply it and
+never fills it in.
+
+It works only after your account has set up the provider and signed the platform's risk-acceptance waiver. Without
+both, the platform refuses the call with a `403`, which the tool returns to you as written. A call served by your
+own provider leaves the platform-hosted Bedrock path, and Vectros's AWS BAA boundary, so decide deliberately whether a given call should use it.
+Nothing here is a statement about how a provider you chose handles your data.
 
 ### Opting into a subset
 
@@ -368,7 +380,7 @@ running as — `vectros keyring doctor` shows the same view.
 |---|---|---|---|
 | `VECTROS_API_KEY` | no\* | — | Vectros API key. Accepts `sk_*` / `ssk_*` / `st_*`; `ssk_*` recommended. \*Required **unless** the `vectros` CLI is installed with a usable keyring entry — see [Credential resolution](#credential-resolution). Takes precedence when set. |
 | `VECTROS_KEYRING_ALIAS` | no | (the active entry) | Resolve this `vectros` keyring entry instead of the active one. Ignored when `VECTROS_API_KEY` is set. |
-| `VECTROS_API_BASE_URL` | no | `https://api.vectros.ai` | Override for staging or other envs. Validated: must be `https://` (or `http://` to localhost) and an official `*.vectros.ai` host. |
+| `VECTROS_API_BASE_URL` | no | `https://api.vectros.ai` | Override for another environment. Validated: must be `https://` (or `http://` to localhost) and an official `*.vectros.ai` host. |
 | `VECTROS_ALLOW_INSECURE_BASE_URL` | no | — | Set `1` to bypass the base-URL allow-list (e.g. a trusted local proxy). **Not recommended** — sends your key to an unvalidated host; logs a warning. |
 | `VECTROS_MCP_INGEST_ROOT` | no | process cwd | Directory `document_ingest`'s `filePath` mode is jailed to. Paths escaping it (traversal/absolute/symlink) or matching a sensitive pattern are rejected. |
 | `VECTROS_MCP_TOOLS` | no | (all tools) | Comma-separated tool names (e.g. `hybrid_search,rag_ask`). |
@@ -498,17 +510,16 @@ The server is on a pre-1.0 track toward a stable 1.0 release.
 
 ## Rate limits
 
-Tool calls hit the same per-account per-minute rate limit as any API client (writes, searches,
-and inference count against it; reads do not). On a `429` the server surfaces the error with its
-`Retry-After` hint so the agent can pace and retry rather than blind-retrying. See the
-[rate limits guide](https://docs.vectros.ai/guides/operations-trust/rate-limits) for the per-plan
-limits.
+Tool calls hit the same per-minute rate limits as any API client; the
+[rate limits guide](https://docs.vectros.ai/guides/operations-trust/rate-limits) says which requests count. On a `429` the server surfaces the error with its
+`Retry-After` hint so the agent can pace and retry rather than blind-retrying. The guide also lists
+the per-plan limits.
 
 ## Building from source
 
 ```sh
 git clone https://github.com/vectros-ai/vectros-mcp-server
-cd mcp-server
+cd vectros-mcp-server
 npm install
 npm run build
 npm test
@@ -529,6 +540,12 @@ Vectros enforces per-customer, fail-closed isolation and least-privilege scoped 
 tamper-evident audit and version history. Customer-facing surfaces are hardened through extensive
 adversarial security review. For the full trust posture, drawn plainly with its boundaries, see the
 [compliance and trust guide](https://docs.vectros.ai/guides/operations-trust/compliance).
+
+**Tool output is untrusted, API-supplied content.** Every tool here returns your own tenant's data —
+document text, search results, error messages — as plain text inside the MCP response. This server
+does not sanitize, escape, or pre-render that text, and none of these tools evaluate or execute it.
+Render tool output the same way you'd render any other data an agent pulled from an external source
+— safely, in your client — rather than `eval`-ing it or trusting it as pre-sanitized.
 
 ## License
 

@@ -4,8 +4,8 @@
  * Result limits + pagination (the enumeration-limits contract):
  *   default limit = 3   — a low ceiling: a tool result injects directly into the LLM
  *                         context window, and contextText-heavy hits are ~1k tokens each.
- *   max limit     = 50  — the search API max (the engine caps a page at 50). Raise `limit`
- *                         to pull more in one call when you can accept the cost; the
+ *   max limit     = 50  — this tool's own ceiling (the search API itself accepts 1-100). Raise
+ *                         `limit` to pull more in one call when you can accept the cost; the
  *                         per-response byte budget still trims an oversized tail.
  *
  * Pagination is via `offset`; `totalResults` (the full matching pool) drives an explicit
@@ -82,7 +82,7 @@ const inputSchema = {
     .optional()
     .describe(
       `Max hits per page. Defaults to a low ${MCP_DEFAULT_LIMIT} to protect the agent context ` +
-        `window; raise up to ${MCP_MAX_LIMIT} (the most a single search returns) in one call when you can ` +
+        `window; raise up to ${MCP_MAX_LIMIT} (this tool's ceiling) in one call when you can ` +
         'accept the larger result, or page with `offset` instead.',
     ),
   offset: z.number().int().min(0).max(200).optional().describe('Skip the first N hits — for pagination (0–200).'),

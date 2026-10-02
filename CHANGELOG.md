@@ -3,6 +3,34 @@
 All notable changes to `@vectros-ai/mcp-server` are documented here.
 This project adheres to [Semantic Versioning](https://semver.org).
 
+## 0.18.0 — 2026-10-01
+
+### Added
+
+- **`document_ingest` takes an optional `confirmUntyped`.** The platform refuses a document create that supplies an
+  `externalId` without a `schemaId` (`400`), because `externalId` is unique per schema. Pass `confirmUntyped: true`
+  to say an untyped document is intended; it works in both text and file mode and is never set for you. An agent
+  that calls `document_ingest` with an `externalId` and no `schemaId` gets that `400` unless it passes
+  `confirmUntyped: true` or a `schemaId`.
+- **`rag_ask` and `document_ask` take an optional `providerAlias`.** It routes that one call through the model
+  provider your account has activated under that alias instead of platform-hosted Bedrock, and `model` then names a
+  model on that provider's own id space. It works only after your account has configured the provider and signed the
+  platform's risk-acceptance waiver; otherwise the platform refuses the call with a `403`, which the tool returns as
+  written. The README section on routing a call through your own provider has the details.
+
+### Changed
+
+- **`rag_ask` and `document_ask` descriptions say where a call is served:** platform-hosted AWS Bedrock by default,
+  your own model provider when `providerAlias` is set.
+- **`document_ingest` in file mode reports how to confirm a replacement.** When the call replaces an existing
+  document's file (`created: false`), the tool description and the response note say to watch the document's
+  `fileItemId` for the new file instead of `indexStatus`, and `document_get`'s `includeDownloadUrl` description says a
+  download URL can stop working before its stated `downloadExpires` once the file is replaced. The description also
+  states that re-ingesting a file against an existing `externalId` needs `documents:u`.
+- **`rag_ask`'s model example is `claude-opus-5-5`,** since `claude-opus-4-8` is retired.
+- **The README states that tool output is untrusted, API-supplied content.** No tool sanitizes, escapes or
+  pre-renders the text it returns; render it safely in your own client.
+
 ## 0.17.2 — 2026-09-22
 
 ### Changed

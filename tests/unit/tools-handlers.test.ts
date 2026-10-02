@@ -920,6 +920,62 @@ test('rag_ask returns isError when SDK throws', async () => {
   assert.match(r.content[0].text, /quota exceeded/);
 });
 
+// `providerAlias` routes one call through the caller's own model provider. It is an opt-in input: forwarded only
+// when supplied, never defaulted, and the platform's own refusal (a 403 until the account has set up the provider
+// and signed the waiver) reaches the caller as written.
+test('rag_ask forwards providerAlias, and the model that names a model on that provider, when supplied', async () => {
+  const s = spy();
+  const client = {
+    inference: {
+      ragInference: async (args: unknown) => {
+        s.record('ragInference', args);
+        return ragStream();
+      },
+    },
+  } as never;
+  const tool = ragAsk({ client, log });
+  const r = await tool.handler({ query: 'q', providerAlias: 'my-vllm', model: 'llama-3-70b' }, {});
+  assert.ok(!r.isError);
+  const a = s.calls[0].args as Record<string, unknown>;
+  assert.equal(a.providerAlias, 'my-vllm');
+  assert.equal(a.model, 'llama-3-70b', 'model is forwarded untouched; the platform reinterprets it for a provider');
+});
+
+test('rag_ask sends no providerAlias unless the caller supplied one', async () => {
+  const s = spy();
+  const client = {
+    inference: {
+      ragInference: async (args: unknown) => {
+        s.record('ragInference', args);
+        return ragStream();
+      },
+    },
+  } as never;
+  const tool = ragAsk({ client, log });
+  await tool.handler({ query: 'q', model: 'claude-haiku-4-5' }, {});
+  const a = s.calls[0].args as Record<string, unknown>;
+  assert.equal(a.providerAlias, undefined, 'never defaulted: the platform-hosted path stays the default');
+  assert.equal(JSON.stringify(a).includes('providerAlias'), false, 'and absent from what is serialised');
+});
+
+test('rag_ask returns the platform 403 for an unknown or not-yet-enabled providerAlias as written', async () => {
+  const client = {
+    inference: {
+      ragInference: async () => {
+        const e = new Error('ForbiddenError') as Error & { statusCode: number; body: unknown };
+        e.statusCode = 403;
+        e.body = { message: 'Provider alias is not active for this account.', requestId: 'req-1' };
+        throw e;
+      },
+    },
+  } as never;
+  const tool = ragAsk({ client, log });
+  const r = await tool.handler({ query: 'q', providerAlias: 'not-enabled' }, {});
+  assert.equal(r.isError, true);
+  assert.match(r.content[0].text, /HTTP 403/, 'the status reaches the caller');
+  assert.match(r.content[0].text, /Provider alias is not active for this account\./, 'and the platform message, unaltered');
+});
+
 // ============================================================================
 // document_ask
 // ============================================================================
@@ -968,6 +1024,60 @@ test('document_ask returns isError when SDK throws', async () => {
   const r = await tool.handler({ documentId: 'd1', prompt: 'q' }, {});
   assert.equal(r.isError, true);
   assert.match(r.content[0].text, /413/, 'statusCode surfaces');
+});
+
+test('document_ask forwards providerAlias, and the model that names a model on that provider, when supplied', async () => {
+  const s = spy();
+  const client = {
+    inference: {
+      documentAsk: async (args: unknown) => {
+        s.record('documentAsk', args);
+        return askStream();
+      },
+    },
+  } as never;
+  const tool = documentAsk({ client, log });
+  const r = await tool.handler({ documentId: 'd1', prompt: 'q', providerAlias: 'my-vllm', model: 'llama-3-70b' }, {});
+  assert.ok(!r.isError);
+  const a = s.calls[0].args as Record<string, unknown>;
+  assert.equal(a.providerAlias, 'my-vllm');
+  assert.equal(a.model, 'llama-3-70b');
+  assert.equal(a.id, 'd1', 'the document id is still sent as `id`');
+});
+
+test('document_ask sends no providerAlias unless the caller supplied one', async () => {
+  const s = spy();
+  const client = {
+    inference: {
+      documentAsk: async (args: unknown) => {
+        s.record('documentAsk', args);
+        return askStream();
+      },
+    },
+  } as never;
+  const tool = documentAsk({ client, log });
+  await tool.handler({ documentId: 'd1', prompt: 'q' }, {});
+  const a = s.calls[0].args as Record<string, unknown>;
+  assert.equal(a.providerAlias, undefined, 'never defaulted');
+  assert.equal(JSON.stringify(a).includes('providerAlias'), false, 'and absent from what is serialised');
+});
+
+test('document_ask returns the platform 403 for an unknown or not-yet-enabled providerAlias as written', async () => {
+  const client = {
+    inference: {
+      documentAsk: async () => {
+        const e = new Error('ForbiddenError') as Error & { statusCode: number; body: unknown };
+        e.statusCode = 403;
+        e.body = { message: 'Provider alias is not active for this account.', requestId: 'req-2' };
+        throw e;
+      },
+    },
+  } as never;
+  const tool = documentAsk({ client, log });
+  const r = await tool.handler({ documentId: 'd1', prompt: 'q', providerAlias: 'not-enabled' }, {});
+  assert.equal(r.isError, true);
+  assert.match(r.content[0].text, /HTTP 403/);
+  assert.match(r.content[0].text, /Provider alias is not active for this account\./);
 });
 
 // ============================================================================
@@ -1565,6 +1675,116 @@ test('document_ingest text mode passes upsert as the top-level request flag (re-
   assert.equal(req.body.schemaId, 'sch_1', 'schemaId re-supplied so externalId resolves in the typed namespace');
 });
 
+// The platform refuses an externalId that arrives without a schemaId (400) unless the request also
+// carries `confirmUntyped`. The tool offers it as an explicit opt-in and never sets it on the caller's
+// behalf: the guard exists to catch an agent that forgot `schemaId`, so the agent has to say it means
+// untyped. It is a query parameter on the wire, so it rides beside `upsert`, never inside the body.
+test('document_ingest text mode forwards confirmUntyped as a top-level request flag, not in the body', async () => {
+  const s = spy();
+  const client = {
+    documents: {
+      ingestDocument: async (args: unknown) => {
+        s.record('ingestDocument', args);
+        return { id: 'doc_new', created: true };
+      },
+    },
+  } as never;
+  const tool = documentIngest({ client, log });
+  await tool.handler({ title: 'T', text: 'body', externalId: 'ext-1', confirmUntyped: true }, {});
+  const req = s.calls[0].args as { confirmUntyped?: boolean; body: Record<string, unknown> };
+  assert.equal(req.confirmUntyped, true, 'confirmUntyped forwarded at the top level');
+  assert.equal(req.body.confirmUntyped, undefined, 'never inside the JSON body');
+  assert.equal(req.body.externalId, 'ext-1');
+  assert.equal(req.body.schemaId, undefined, 'the untyped call names no schema');
+});
+
+test('document_ingest text mode sends no confirmUntyped unless the caller asked for it', async () => {
+  const s = spy();
+  const client = {
+    documents: {
+      ingestDocument: async (args: unknown) => {
+        s.record('ingestDocument', args);
+        return { id: 'doc_new', created: true };
+      },
+    },
+  } as never;
+  const tool = documentIngest({ client, log });
+  // An externalId with no schemaId and no opt-in: the tool must NOT quietly confirm it, so the
+  // platform's own refusal reaches the agent instead of a forgotten schemaId becoming an untyped copy.
+  await tool.handler({ title: 'T', text: 'body', externalId: 'ext-1' }, {});
+  await tool.handler({ title: 'T2', text: 'body', externalId: 'ext-2', schemaId: 'sch_1' }, {});
+  const reqs = s.calls.map((c) => c.args as { confirmUntyped?: boolean });
+  assert.equal(reqs[0].confirmUntyped, undefined, 'not defaulted on when externalId lacks a schemaId');
+  assert.equal(reqs[1].confirmUntyped, undefined, 'not sent on a typed create');
+});
+
+test('document_ingest text mode forwards upsert and confirmUntyped together (the untyped re-sync)', async () => {
+  const s = spy();
+  const client = {
+    documents: {
+      ingestDocument: async (args: unknown) => {
+        s.record('ingestDocument', args);
+        return { id: 'doc1', created: false };
+      },
+    },
+  } as never;
+  const tool = documentIngest({ client, log });
+  await tool.handler({ title: 'T', text: 'edited', externalId: 'ext-9', upsert: true, confirmUntyped: true }, {});
+  const req = s.calls[0].args as { upsert?: boolean; confirmUntyped?: boolean; body: Record<string, unknown> };
+  assert.equal(req.upsert, true, 'upsert still forwarded');
+  assert.equal(req.confirmUntyped, true, 'and so is confirmUntyped, neither overwriting the other');
+  assert.equal(req.body.schemaId, undefined, 'the untyped namespace is targeted');
+});
+
+test('document_ingest forwards an explicit confirmUntyped:false unchanged, not coerced or dropped', async () => {
+  const s = spy();
+  const client = {
+    documents: {
+      ingestDocument: async (args: unknown) => {
+        s.record('ingestDocument', args);
+        return { id: 'doc1', created: true };
+      },
+    },
+  } as never;
+  const tool = documentIngest({ client, log });
+  await tool.handler({ title: 'T', text: 'body', externalId: 'ext-1', confirmUntyped: false }, {});
+  assert.equal((s.calls[0].args as { confirmUntyped?: boolean }).confirmUntyped, false);
+});
+
+test('document_ingest file mode forwards confirmUntyped to uploadDocument', async () => {
+  const s = spy();
+  const client = {
+    documents: {
+      uploadDocument: async (args: unknown) => {
+        s.record('uploadDocument', args);
+        return { id: 'doc1', uploadUrl: 'https://x/y', created: true };
+      },
+    },
+  } as never;
+  const tmp = join(tmpdir(), `mcp-untyped-${process.pid}.txt`);
+  await writeFile(tmp, 'file bytes');
+  try {
+    const tool = documentIngest({ client, log, ingestRoot: tmpdir() });
+    const origFetch = globalThis.fetch;
+    globalThis.fetch = (async () => ({ ok: true, status: 200, text: async () => '' })) as never;
+    try {
+      await tool.handler({ title: 'F', filePath: basename(tmp), externalId: 'ext-3', confirmUntyped: true }, {});
+      await tool.handler({ title: 'F2', filePath: basename(tmp), externalId: 'ext-4' }, {});
+    } finally {
+      globalThis.fetch = origFetch;
+    }
+    const reqs = s.calls
+      .filter((c) => c.method === 'uploadDocument')
+      .map((c) => c.args as { confirmUntyped?: boolean; externalId?: string });
+    assert.equal(reqs.length, 2);
+    assert.equal(reqs[0].confirmUntyped, true, 'opt-in forwarded on the file path');
+    assert.equal(reqs[0].externalId, 'ext-3', 'and the externalId it confirms for travels with it');
+    assert.equal(reqs[1].confirmUntyped, undefined, 'not defaulted on when omitted');
+  } finally {
+    await unlink(tmp);
+  }
+});
+
 test('document_ingest file mode passes upsert to uploadDocument', async () => {
   const s = spy();
   const client = {
@@ -1651,7 +1871,7 @@ test('document_ingest rejects filePath on HTTP transport with actionable message
   assert.match(r.content[0].text, /text.*mode|uploadDocument/, 'mentions workaround');
 });
 
-test('document_ingest file mode reads + uploads + returns indexStatus PENDING_INDEX', async () => {
+test('document_ingest file mode (first-time, created:true) reads + uploads + returns indexStatus PENDING_INDEX', async () => {
   // Real temp file for the fs.readFile path.
   const tmpFile = join(tmpdir(), `mcp-ingest-test-${process.pid}.txt`);
   await writeFile(tmpFile, 'file body bytes');
@@ -1672,6 +1892,7 @@ test('document_ingest file mode reads + uploads + returns indexStatus PENDING_IN
           sdkCalls.push({ method: 'uploadDocument', args });
           return {
             id: 'doc_uploaded',
+            created: true,
             uploadUrl: 'https://s3.example/presigned?sig=x',
             expiresAt: '2026-01-01T00:00:00Z',
             status: 'ACTIVE',
@@ -1702,12 +1923,58 @@ test('document_ingest file mode reads + uploads + returns indexStatus PENDING_IN
     assert.deepEqual(headers, { 'Content-Type': 'text/plain' });
 
     // Response surfaces indexStatus PENDING_INDEX (the stale pre-PUT
-    // PENDING_UPLOAD overridden) + polling note; lifecycle status untouched.
+    // PENDING_UPLOAD overridden) + the first-time polling note; lifecycle status untouched.
     const body = parsedText(r) as Record<string, unknown>;
     assert.equal(body.id, 'doc_uploaded');
     assert.equal(body.indexStatus, 'PENDING_INDEX');
     assert.equal(body.status, 'ACTIVE', 'lifecycle status passes through, not clobbered');
-    assert.match(String(body._note), /Poll document_get/);
+    assert.match(String(body._note), /Poll document_get\(id\) until indexStatus is INDEXED/);
+    assert.doesNotMatch(String(body._note), /fileItemId/, 'first-time ingest note has no replacement caveat');
+  } finally {
+    globalThis.fetch = originalFetch;
+    await unlink(tmpFile).catch(() => {});
+  }
+});
+
+test('document_ingest file mode (replacement, created:false) warns to watch fileItemId, not indexStatus', async () => {
+  // A re-upload under an existing externalId (upsert:true) — the SDK reports created:false.
+  const tmpFile = join(tmpdir(), `mcp-ingest-replace-test-${process.pid}.txt`);
+  await writeFile(tmpFile, 'replacement file body bytes');
+
+  const originalFetch = globalThis.fetch;
+  // @ts-expect-error — test override.
+  globalThis.fetch = async () =>
+    ({ ok: true, status: 200, statusText: 'OK', text: async () => '' }) as Response;
+
+  try {
+    const client = {
+      documents: {
+        uploadDocument: async () => ({
+          id: 'doc_existing',
+          created: false,
+          uploadUrl: 'https://s3.example/presigned?sig=y',
+          status: 'ACTIVE',
+          indexStatus: 'INDEXED', // stale — still the PREVIOUS file's state
+        }),
+      },
+    } as never;
+    const tool = documentIngest({ client, log, transport: 'stdio', ingestRoot: tmpdir() });
+    const r = await tool.handler(
+      { title: 'My File', filePath: tmpFile, externalId: 'ext-1', upsert: true },
+      {},
+    );
+    assert.ok(!r.isError, `must not error: ${JSON.stringify(r)}`);
+
+    const body = parsedText(r) as Record<string, unknown>;
+    assert.equal(body.id, 'doc_existing');
+    assert.equal(body.indexStatus, 'PENDING_INDEX', 'still overridden to the post-upload processing state');
+    assert.doesNotMatch(
+      String(body._note),
+      /Poll document_get\(id\) until indexStatus is INDEXED\./,
+      'replacement note does not repeat the misleading indexStatus-only guidance',
+    );
+    assert.match(String(body._note), /fileItemId/, 'replacement note points at fileItemId as the adoption signal');
+    assert.match(String(body._note), /downloadExpires/, 'replacement note warns about stale download URLs');
   } finally {
     globalThis.fetch = originalFetch;
     await unlink(tmpFile).catch(() => {});
@@ -1926,11 +2193,14 @@ test('document_update sends fields as the merge-patch payload (no read-modify-wr
   const r = await tool.handler({ documentId: 'doc1', fields: { b: 99, c: 3 } }, {});
   assert.ok(!r.isError);
   assert.equal(s.calls.find((c) => c.method === 'getDocument'), undefined, 'no read-modify-write');
-  const upd = s.calls.find((c) => c.method === 'patchDocument')!.args as { id: string; body: Record<string, unknown> };
+  // patchDocument has its own dedicated request schema (every field but `id` optional) —
+  // the patch fields ride flat on the request, not nested under a `body` key.
+  const upd = s.calls.find((c) => c.method === 'patchDocument')!.args as
+    { id: string; payload?: Record<string, unknown>; title?: string; expectedVersion?: number };
   assert.equal(upd.id, 'doc1');
-  assert.deepEqual(upd.body.payload, { b: 99, c: 3 }, 'fields sent verbatim for the server to deep-merge');
-  assert.equal(upd.body.title, undefined, 'title omitted when not changing it (server preserves)');
-  assert.equal(upd.body.expectedVersion, undefined, 'no version pin when the caller omits expectedVersion');
+  assert.deepEqual(upd.payload, { b: 99, c: 3 }, 'fields sent verbatim for the server to deep-merge');
+  assert.equal(upd.title, undefined, 'title omitted when not changing it (server preserves)');
+  assert.equal(upd.expectedVersion, undefined, 'no version pin when the caller omits expectedVersion');
 });
 
 test('document_update forwards title/folderId/ownership; omits payload when no fields given', async () => {
@@ -1949,14 +2219,14 @@ test('document_update forwards title/folderId/ownership; omits payload when no f
     {},
   );
   assert.ok(!r.isError);
-  const upd = s.calls[0].args as { body: Record<string, unknown> };
-  assert.equal(upd.body.title, 'New Title');
-  assert.equal(upd.body.folderId, 'fld_new');
-  assert.equal(upd.body.storeText, undefined,
+  const upd = s.calls[0].args as Record<string, unknown>;
+  assert.equal(upd.title, 'New Title');
+  assert.equal(upd.folderId, 'fld_new');
+  assert.equal(upd.storeText, undefined,
     'storeText is immutable (fixed at ingest) — never forwarded on update, even if supplied');
-  assert.equal(upd.body.userId, 'u9', 'ownership reassignment forwarded');
-  assert.deepEqual(upd.body.scopes, ['org:o9', 'client:c9']);
-  assert.equal(upd.body.payload, undefined, 'no fields → payload omitted (preserved, not wiped)');
+  assert.equal(upd.userId, 'u9', 'ownership reassignment forwarded');
+  assert.deepEqual(upd.scopes, ['org:o9', 'client:c9']);
+  assert.equal(upd.payload, undefined, 'no fields → payload omitted (preserved, not wiped)');
 });
 
 test('document_update forwards text (in-place body re-index) and omits it when absent', async () => {
@@ -1971,12 +2241,12 @@ test('document_update forwards text (in-place body re-index) and omits it when a
   } as never;
   const tool = documentUpdate({ client, log });
   await tool.handler({ documentId: 'doc1', text: 'freshly edited body' }, {});
-  const withText = s.calls[0].args as { body: Record<string, unknown> };
-  assert.equal(withText.body.text, 'freshly edited body', 'text forwarded to re-ingest the body');
+  const withText = s.calls[0].args as Record<string, unknown>;
+  assert.equal(withText.text, 'freshly edited body', 'text forwarded to re-ingest the body');
 
   await tool.handler({ documentId: 'doc1', fields: { a: 1 } }, {});
-  const noText = s.calls[1].args as { body: Record<string, unknown> };
-  assert.equal(noText.body.text, undefined, 'text omitted when not supplied (stored text preserved)');
+  const noText = s.calls[1].args as Record<string, unknown>;
+  assert.equal(noText.text, undefined, 'text omitted when not supplied (stored text preserved)');
 });
 
 test('document_update forwards a null payload field (merge-patch key deletion)', async () => {
@@ -1992,9 +2262,9 @@ test('document_update forwards a null payload field (merge-patch key deletion)',
   const tool = documentUpdate({ client, log });
   const r = await tool.handler({ documentId: 'doc1', fields: { stale: null, keep: 'v' } }, {});
   assert.ok(!r.isError);
-  const upd = s.calls[0].args as { body: { payload: Record<string, unknown> } };
-  assert.equal(upd.body.payload.stale, null, 'null forwarded so the server deletes the key (RFC-7386)');
-  assert.equal(upd.body.payload.keep, 'v');
+  const upd = s.calls[0].args as { payload: Record<string, unknown> };
+  assert.equal(upd.payload.stale, null, 'null forwarded so the server deletes the key (RFC-7386)');
+  assert.equal(upd.payload.keep, 'v');
 });
 
 test('document_update forwards expectedVersion; server enforces the conflict (409 → isError)', async () => {
@@ -2013,8 +2283,8 @@ test('document_update forwards expectedVersion; server enforces the conflict (40
   const r = await tool.handler({ documentId: 'doc1', fields: { x: 1 }, expectedVersion: 5 }, {});
   assert.equal(r.isError, true);
   assert.match(r.content[0].text, /409|conflict/i);
-  const upd = s.calls[0].args as { body: Record<string, unknown> };
-  assert.equal(upd.body.expectedVersion, 5, 'caller version forwarded for server-side optimistic concurrency');
+  const upd = s.calls[0].args as Record<string, unknown>;
+  assert.equal(upd.expectedVersion, 5, 'caller version forwarded for server-side optimistic concurrency');
 });
 
 test('document_update forwards status (archive → restore) and omits it when absent', async () => {
@@ -2023,8 +2293,8 @@ test('document_update forwards status (archive → restore) and omits it when ab
     documents: {
       patchDocument: async (args: unknown) => {
         s.record('patchDocument', args);
-        const { body } = args as { body: Record<string, unknown> };
-        return { id: 'doc1', status: body.status ?? 'ACTIVE', version: 6 };
+        const { status } = args as Record<string, unknown>;
+        return { id: 'doc1', status: status ?? 'ACTIVE', version: 6 };
       },
     },
   } as never;
@@ -2032,17 +2302,17 @@ test('document_update forwards status (archive → restore) and omits it when ab
 
   const r = await tool.handler({ documentId: 'doc1', status: 'ARCHIVED' }, {});
   assert.ok(!r.isError);
-  const archived = s.calls[0].args as { body: Record<string, unknown> };
-  assert.equal(archived.body.status, 'ARCHIVED', 'archive forwarded as the lifecycle status');
+  const archived = s.calls[0].args as Record<string, unknown>;
+  assert.equal(archived.status, 'ARCHIVED', 'archive forwarded as the lifecycle status');
   assert.match(r.content[0].text, /"status": "ARCHIVED"/, 'updated status surfaced in the tool result');
 
   await tool.handler({ documentId: 'doc1', status: 'ACTIVE' }, {});
-  const restored = s.calls[1].args as { body: Record<string, unknown> };
-  assert.equal(restored.body.status, 'ACTIVE', 'restore forwarded');
+  const restored = s.calls[1].args as Record<string, unknown>;
+  assert.equal(restored.status, 'ACTIVE', 'restore forwarded');
 
   await tool.handler({ documentId: 'doc1', fields: { a: 1 } }, {});
-  const noStatus = s.calls[2].args as { body: Record<string, unknown> };
-  assert.equal(noStatus.body.status, undefined, 'status omitted when not supplied (lifecycle preserved)');
+  const noStatus = s.calls[2].args as Record<string, unknown>;
+  assert.equal(noStatus.status, undefined, 'status omitted when not supplied (lifecycle preserved)');
 });
 
 test('document_update archives via the externalId+type selector, combined with text + expectedVersion', async () => {
@@ -2065,11 +2335,12 @@ test('document_update archives via the externalId+type selector, combined with t
     {},
   );
   assert.ok(!r.isError);
-  const upd = s.calls.find((c) => c.method === 'patchDocument')!.args as { id: string; body: Record<string, unknown> };
+  const upd = s.calls.find((c) => c.method === 'patchDocument')!.args as
+    { id: string; status?: string; text?: string; expectedVersion?: number };
   assert.equal(upd.id, 'doc_resolved', 'externalId+type resolved to the document id');
-  assert.equal(upd.body.status, 'ARCHIVED', 'status rides the same merge-patch as the other changes');
-  assert.equal(upd.body.text, 'final body');
-  assert.equal(upd.body.expectedVersion, 2);
+  assert.equal(upd.status, 'ARCHIVED', 'status rides the same merge-patch as the other changes');
+  assert.equal(upd.text, 'final body');
+  assert.equal(upd.expectedVersion, 2);
 });
 
 test('document_update returns isError when SDK throws', async () => {

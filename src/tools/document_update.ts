@@ -107,7 +107,7 @@ const documentUpdate: ToolFactory = ({ client, log }) => ({
     const fields = args.fields as Record<string, unknown> | undefined;
     const text = args.text as string | undefined;
     const folderId = args.folderId as string | undefined;
-    const status = args.status as Vectros.DocumentRequest.Status | undefined;
+    const status = args.status as Vectros.DocumentPatchRequest.Status | undefined;
     const userId = args.userId as string | undefined;
     const scopes = args.scopes as string[] | undefined;
     const expectedVersion = args.expectedVersion as number | undefined;
@@ -116,22 +116,22 @@ const documentUpdate: ToolFactory = ({ client, log }) => ({
       if ('error' in resolved) return toolError('document_update', new Error(resolved.error));
       // RFC-7386 merge-patch: send only what's changing. The server preserves
       // omitted top-level fields and deep-merges `payload`, so no read-modify-write
-      // and no title-carry-forward is needed. `title` is omitted when the caller
-      // isn't changing it; the shared DocumentRequest type marks it required (it is
-      // for PUT), so the patch body is assembled untyped and cast at the call.
-      const body: Record<string, unknown> = {};
-      if (title !== undefined) body.title = title;
-      if (fields !== undefined) body.payload = fields;
-      if (text !== undefined) body.text = text;
-      if (folderId !== undefined) body.folderId = folderId;
-      if (status !== undefined) body.status = status;
-      if (userId !== undefined) body.userId = userId;
-      if (scopes !== undefined) body.scopes = scopes;
-      if (expectedVersion !== undefined) body.expectedVersion = expectedVersion;
+      // and no title-carry-forward is needed. Every field on DocumentPatchRequest is
+      // optional (unlike DocumentRequest's PUT/POST shape, which requires `title`),
+      // so the patch fields are assembled untyped and cast at the call.
+      const patch: Record<string, unknown> = {};
+      if (title !== undefined) patch.title = title;
+      if (fields !== undefined) patch.payload = fields;
+      if (text !== undefined) patch.text = text;
+      if (folderId !== undefined) patch.folderId = folderId;
+      if (status !== undefined) patch.status = status;
+      if (userId !== undefined) patch.userId = userId;
+      if (scopes !== undefined) patch.scopes = scopes;
+      if (expectedVersion !== undefined) patch.expectedVersion = expectedVersion;
 
       const updated = await client.documents.patchDocument({
         id: resolved.id,
-        body: body as Vectros.DocumentRequest,
+        ...(patch as Omit<Vectros.DocumentPatchRequest, 'id'>),
       });
       log.debug({ tool: 'document_update', documentId: resolved.id, externalId }, 'document_update ok');
       return { content: [{ type: 'text', text: JSON.stringify(updated, null, 2) }] };

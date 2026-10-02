@@ -164,7 +164,8 @@ const inputSchema = {
         'externalId returns the existing document (idempotent) instead of creating a duplicate — use it to make ' +
         'ingests safely retryable and as the key other records reference. Mirrors record_create. Receiving the ' +
         'existing document back is a read of it and needs documents:r in addition to documents:c; a create-only ' +
-        'key gets an "already exists" error instead of the document.',
+        'key gets an "already exists" error instead of the document. Pass `schemaId` with it: an externalId with ' +
+        'no `schemaId` is refused (400) unless `confirmUntyped` is true.',
     ),
   upsert: z
     .boolean()
@@ -174,8 +175,9 @@ const inputSchema = {
         '(text mode) / re-uploads and re-indexes the new file (file mode), instead of returning the existing ' +
         'one unchanged. This is the curation/re-sync primitive: edit a source, re-ingest with upsert:true, and ' +
         'the search index reflects the new content. Requires the documents:u scope. IMPORTANT: pass the SAME ' +
-        'schemaId (and type) you used originally — externalId is unique WITHIN a type, so omitting schemaId ' +
-        'resolves in the untyped namespace and mints a duplicate instead of updating. The response `created` ' +
+        'schemaId (and type) you used originally — externalId is unique WITHIN a type. Omitting schemaId is ' +
+        'refused (400) unless `confirmUntyped` is true, and with it the call targets the UNTYPED namespace, so ' +
+        'it mints or updates an untyped document and never touches the typed one. The response `created` ' +
         'flag confirms which happened (created:true = a new document was minted).',
     ),
   schemaId: z
@@ -184,7 +186,18 @@ const inputSchema = {
     .describe(
       'Bind this document to a record schema. When set, `payload` is validated against the schema and its ' +
         'lookup fields become directly queryable via document_query (records parity). Resolve a schema id from ' +
-        'its type via list_schemas. Omit for an untyped document.',
+        'its type via list_schemas. Omit for an untyped document (an untyped document that also carries an ' +
+        '`externalId` needs `confirmUntyped`).',
+    ),
+  confirmUntyped: z
+    .boolean()
+    .optional()
+    .describe(
+      'Set true to confirm that an UNTYPED document is what you intend when you pass `externalId` without ' +
+        '`schemaId`. Without it the platform refuses that combination (400): externalId is unique per schema, ' +
+        'so a forgotten `schemaId` would otherwise quietly create a separate untyped copy instead of reaching the ' +
+        'typed document you meant. Do not set it just to get past that error — check that the document really is ' +
+        'untyped first. Ignored when `schemaId` is given or `externalId` is omitted.',
     ),
   payload: z
     .record(z.string(), z.unknown())
@@ -261,13 +274,27 @@ const documentIngest: ToolFactory = ({ client, log, transport, ingestRoot }) => 
     '  • Text mode: pass `text` (string body). Single-call. Use for crawled content, notes, generated text.\n' +
     '  • File mode: pass `filePath` (local path on the MCP server\'s host machine). STDIO-TRANSPORT ONLY — ' +
     'rejected on HTTP transport. MCP server reads the bytes, requests a presigned upload URL, and PUTs them. ' +
-    'Returns when the upload is accepted (indexStatus: PENDING_INDEX); poll with `document_get` until indexStatus is INDEXED.\n' +
+    'Returns when the upload is accepted (indexStatus: PENDING_INDEX); poll `document_get` until indexStatus ' +
+    'is INDEXED. EXCEPTION — re-ingesting file mode against an externalId that already has a document ' +
+    '(response `created:false`): the file body is replaced by ANY such re-ingest, whether or not `upsert` was ' +
+    'set (`upsert` there only additionally applies `payload`/`title` to the matched document). The document ' +
+    'keeps serving the OLD file\'s bytes until the new one is adopted, and indexStatus already reads INDEXED ' +
+    'left over from that old file, so polling it returns immediately without waiting for the new content. Poll ' +
+    '`document_get` and watch `fileItemId` instead — once it differs from the value it held before this call, ' +
+    'the new file has been adopted. Re-request any download URL after that: one minted before adoption can ' +
+    'stop working even within its stated `downloadExpires`.\n' +
     'Either `text` or `filePath` must be present; both is an error. ' +
     'Idempotent by `externalId` (re-ingest returns the existing document, not a duplicate — requires ' +
-    'documents:r in addition to documents:c, since being handed the existing document is a read of it). To UPDATE an ' +
+    'documents:r in addition to documents:c, since being handed the existing document is a read of it; in FILE MODE ' +
+    'a re-ingest against an existing externalId needs documents:u). ' +
+    'TEXT MODE: without `upsert`, the existing document\'s content is genuinely unchanged. FILE MODE: as noted ' +
+    'above, a re-ingest against an existing externalId always replaces the file body regardless of `upsert` — ' +
+    'only the `payload`/`title` metadata overwrite is gated by it. To UPDATE an ' +
     'existing document instead — re-index an edited body — pass `upsert:true` with the same `externalId` ' +
     '(and the same `schemaId`); this is the re-sync primitive for keeping a knowledge base current. Pass ' +
     '`schemaId` + `payload` for a typed, lookup-queryable document (records parity). ' +
+    'An `externalId` with no `schemaId` is refused (400) unless you also pass `confirmUntyped:true` to confirm ' +
+    'that an untyped document is intended. ' +
     'indexMode defaults to HYBRID for untyped documents (omit to inherit a bound schema\'s default). ' +
     'storeText is a FILE-MODE knob (default true): false discards the uploaded file\'s extracted text ' +
     'after indexing (search + file download keep working; text retrieval and document_ask do not). ' +
@@ -289,6 +316,7 @@ const documentIngest: ToolFactory = ({ client, log, transport, ingestRoot }) => 
     const filePath = args.filePath as string | undefined;
     const schemaId = args.schemaId as string | undefined;
     const upsert = args.upsert as boolean | undefined;
+    const confirmUntyped = args.confirmUntyped as boolean | undefined;
     // Preserve the legacy default (HYBRID) for untyped documents; when a schema is
     // bound, omit indexMode so the schema's declared default is inherited (the API
     // rejects a request with neither). An explicit value — including NONE — always wins.
@@ -371,6 +399,7 @@ const documentIngest: ToolFactory = ({ client, log, transport, ingestRoot }) => 
       if (text) {
         const result = await client.documents.ingestDocument({
           upsert,
+          confirmUntyped,
           body: {
             title,
             text,
@@ -425,6 +454,7 @@ const documentIngest: ToolFactory = ({ client, log, transport, ingestRoot }) => 
       const storeTextFile = (args.storeText as boolean | undefined) ?? true;
       const upload = await client.documents.uploadDocument({
         upsert,
+        confirmUntyped,
         fileName,
         fileType,
         indexMode,
@@ -471,6 +501,25 @@ const documentIngest: ToolFactory = ({ client, log, transport, ingestRoot }) => 
       // job. The server stamped indexStatus before our PUT completed, so
       // override it with the post-upload processing state (the lifecycle
       // `status` passes through untouched — it's a separate axis).
+      //
+      // `created:false` means this upload REPLACED an existing file (upsert on an
+      // existing externalId). indexStatus can already read INDEXED from the PREVIOUS
+      // file on the very next document_get, which makes "poll until INDEXED" return
+      // immediately while the new content is still being adopted — fileItemId changing
+      // is the reliable adoption signal there instead.
+      const uploadCreated = upload?.created as boolean | undefined;
+      const note =
+        uploadCreated === false
+          ? 'File replaced: this re-ingest matched an existing externalId, which always replaces that document\'s ' +
+            'file body (upsert or not — upsert only additionally applies payload/title to it). The next ' +
+            'document_get call may already show indexStatus: INDEXED — that is left over from the PREVIOUS file, ' +
+            'not confirmation the new one is ready, and the document keeps serving the old file\'s bytes until ' +
+            'adoption completes. Poll document_get(id) and watch fileItemId instead: once it differs from the ' +
+            'value it held before this call, the new file has been adopted. Any download URL already held for ' +
+            'this document was minted for the old file and can stop working before its stated downloadExpires ' +
+            'once adoption happens — request a fresh one after fileItemId changes.'
+          : 'File uploaded; indexing is asynchronous. Poll document_get(id) until indexStatus is INDEXED.';
+
       return {
         content: [
           {
@@ -479,8 +528,7 @@ const documentIngest: ToolFactory = ({ client, log, transport, ingestRoot }) => 
               {
                 ...upload,
                 indexStatus: 'PENDING_INDEX',
-                _note:
-                  'File uploaded; indexing is asynchronous. Poll document_get(id) until indexStatus is INDEXED.',
+                _note: note,
               },
               null,
               2,

@@ -19,12 +19,14 @@ import type { Vectros } from '@vectros-ai/sdk';
 import type { ToolFactory, ToolResult } from './types.js';
 import { consumeStream, type SseEvent } from '../sse.js';
 import { toolError } from './errors.js';
+import { providerAliasInput } from './provider-alias.js';
 
 const SEARCH_MCP_DEFAULT_LIMIT = 5;
-// The grounding-corpus size. Default 5 keeps the prompt tight; max 50 is the RAG search API
-// max (the retrieval helper caps a run at 50 passages) — raise it when a broader corpus is
-// worth the larger prompt. Passages are not returned to the agent inline, so this is a
-// generation-cost knob, not a context-window one; there is no page cursor (it is a corpus size).
+// The grounding-corpus size. Default 5 keeps the prompt tight. This tool's own ceiling is 50;
+// the RAG search API itself accepts 1-100 and rejects a value outside that range with a 400,
+// so the tool stays well inside it. Raise the ceiling when a broader corpus is worth the larger
+// prompt. Passages are not returned to the agent inline, so this is a generation-cost knob, not
+// a context-window one; there is no page cursor (it is a corpus size).
 const SEARCH_MCP_MAX_LIMIT = 50;
 
 const inputSchema = {
@@ -40,9 +42,11 @@ const inputSchema = {
     .string()
     .optional()
     .describe(
-      'Inference model alias (e.g. claude-haiku-4-5, claude-sonnet-5, claude-opus-4-8). ' +
-        'Default = tier-appropriate Haiku. See GET /v1/models for the catalog the calling key can reach.',
+      'Inference model alias (e.g. claude-haiku-4-5, claude-sonnet-5, claude-opus-5-5). ' +
+        'Default = tier-appropriate Haiku. See GET /v1/models for the catalog the calling key can reach. ' +
+        'When `providerAlias` is set, this instead names the model on that provider\'s own id space.',
     ),
+  providerAlias: providerAliasInput,
   search: z
     .object({
       mode: z.enum(['HYBRID', 'TEXT', 'SEMANTIC']).optional().describe('Retrieval mode. Default HYBRID.'),
@@ -54,7 +58,7 @@ const inputSchema = {
         .optional()
         .describe(
           `Passages to retrieve before generating (the grounding-corpus size). Default ` +
-            `${SEARCH_MCP_DEFAULT_LIMIT}; raise up to ${SEARCH_MCP_MAX_LIMIT} (the RAG search API max) for a ` +
+            `${SEARCH_MCP_DEFAULT_LIMIT}; raise up to ${SEARCH_MCP_MAX_LIMIT} (this tool's ceiling) for a ` +
             'broader corpus when the extra grounding is worth the larger prompt.',
         ),
       // Retrieval scoping — parity with hybrid_search so an agent can ground the
@@ -134,7 +138,8 @@ const ragAsk: ToolFactory = ({ client, log }) => ({
     'filters, date window) to ground on a subset — e.g. one patient or one folder — and steer generation with ' +
     '`instructions` / `temperature`. The full answer is returned as a single response; ' +
     'progress notifications keep the call alive during the 30-45s generation window. ' +
-    'Inference runs in-perimeter against AWS Bedrock — PHI never leaves the BAA boundary.',
+    'Calls without `providerAlias` are served by platform-hosted AWS Bedrock. A call that sets `providerAlias` ' +
+    'goes to your own model provider, outside Vectros\'s AWS BAA boundary.',
   inputSchema,
   // NOT a pure read: this call reserves an atomic hold against the caller's prepaid inference
   // balance before generation starts, then debits it on completion — a real financial side
@@ -193,6 +198,7 @@ const ragAsk: ToolFactory = ({ client, log }) => ({
         query: args.query as string,
         instructions: args.instructions as string | undefined,
         model: args.model as string | undefined,
+        providerAlias: args.providerAlias as string | undefined,
         search,
         maxTokens: args.maxTokens as number | undefined,
         temperature: args.temperature as number | undefined,

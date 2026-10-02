@@ -59,7 +59,10 @@ const inputSchema = {
     .describe(
       'If true, also return a short-lived presigned `downloadUrl` for the original file (file-backed documents ' +
         'only — the way to retrieve the raw bytes of a document ingested via file mode). Default false. ' +
-        'Unavailable for text-only documents — `downloadAvailable: false` is set instead.',
+        'Unavailable for text-only documents — `downloadAvailable: false` is set instead. `downloadExpires` is ' +
+        'an upper bound, not a guarantee: if the file behind this document is replaced (a document_ingest ' +
+        'upsert) after this URL is minted, the URL can stop working before that time. Request a fresh one after ' +
+        'any re-ingest rather than reusing one you already hold.',
     ),
 };
 

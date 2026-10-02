@@ -14,6 +14,7 @@ import { z } from 'zod';
 import type { ToolFactory, ToolResult } from './types.js';
 import { consumeStream, type SseEvent } from '../sse.js';
 import { toolError } from './errors.js';
+import { providerAliasInput } from './provider-alias.js';
 
 const inputSchema = {
   documentId: z.string().min(1, 'documentId is required').describe('ID of the document to ask against.'),
@@ -23,8 +24,10 @@ const inputSchema = {
     .optional()
     .describe(
       'Inference model alias. Default = tier-appropriate Haiku. ' +
-        'See GET /v1/models for the catalog the calling key can reach.',
+        'See GET /v1/models for the catalog the calling key can reach. ' +
+        'When `providerAlias` is set, this instead names the model on that provider\'s own id space.',
     ),
+  providerAlias: providerAliasInput,
   maxTokens: z.number().int().min(1).optional().describe('Max output tokens.'),
 };
 
@@ -34,7 +37,8 @@ const documentAsk: ToolFactory = ({ client, log }) => ({
   description:
     'Ask a question against a single indexed document. Returns a grounded answer with the document context that informed it. ' +
     'For documents exceeding the input-token cap, the API returns a structured 413 with `estimatedTokens` and `limitTokens`. ' +
-    'Inference runs in-perimeter against AWS Bedrock — PHI never leaves the BAA boundary.',
+    'Calls without `providerAlias` are served by platform-hosted AWS Bedrock. A call that sets `providerAlias` ' +
+    'goes to your own model provider, outside Vectros\'s AWS BAA boundary.',
   inputSchema,
   // NOT a pure read: this call reserves an atomic hold against the caller's prepaid inference
   // balance before generation starts, then debits it on completion — a real financial side
@@ -51,6 +55,7 @@ const documentAsk: ToolFactory = ({ client, log }) => ({
         id: args.documentId as string,
         prompt: args.prompt as string,
         model: args.model as string | undefined,
+        providerAlias: args.providerAlias as string | undefined,
         maxTokens: args.maxTokens as number | undefined,
       })) as AsyncIterable<SseEvent>;
 

@@ -33,8 +33,10 @@
  *   1   fatal startup error
  *   2   uncaught runtime error
  *
- * Note: same three-file pattern as cli.ts — see CONVENTIONS §46.
- * main() runs unconditionally; helpers in parse-tools-env.ts are
+ * Note: same three-file pattern as cli.ts — a thin bootstrap that runs
+ * main() unconditionally (no `require.main === module` guard, which
+ * evaluates to `false` inside tsup's CJS output), with the testable
+ * logic extracted into sibling files. helpers in parse-tools-env.ts are
  * unit-testable directly.
  */
 import { VectrosMCPServer } from './server.js';

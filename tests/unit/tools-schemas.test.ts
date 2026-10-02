@@ -69,6 +69,13 @@ function validate(tool: keyof typeof tools, args: unknown) {
   return z.object(tools[tool].inputSchema).safeParse(args);
 }
 
+// The server validates a tool call against `.strict()`, so a key missing from a tool's input schema is REJECTED
+// at runtime even though the handler would forward it. The default `validate` above is not strict, so a test that
+// must prove a key is part of the contract uses this one.
+function validateStrict(tool: keyof typeof tools, args: unknown) {
+  return z.object(tools[tool].inputSchema).strict().safeParse(args);
+}
+
 test('hybrid_search accepts minimal args', () => {
   const r = validate('hybrid_search', { query: 'anxiety treatment' });
   assert.ok(r.success);
@@ -181,12 +188,12 @@ test('rag_ask accepts full args', () => {
   assert.ok(r.success);
 });
 
-test('rag_ask accepts search.limit up to the API max (50)', () => {
+test("rag_ask accepts search.limit up to this tool's ceiling (50)", () => {
   const r = validate('rag_ask', { query: 'q', search: { limit: 50 } });
-  assert.ok(r.success, 'corpus limit 50 (the RAG search API max) is allowed');
+  assert.ok(r.success, "corpus limit 50 (this tool's ceiling) is allowed");
 });
 
-test('rag_ask rejects search.limit > 50 (the API max)', () => {
+test("rag_ask rejects search.limit > 50 (this tool's ceiling, below the API's own 100)", () => {
   const r = validate('rag_ask', { query: 'q', search: { limit: 51 } });
   assert.ok(!r.success);
 });
@@ -251,6 +258,27 @@ test('document_get rejects non-boolean includeText', () => {
 test('current_identity accepts empty args (no args expected)', () => {
   const r = validate('current_identity', {});
   assert.ok(r.success);
+});
+
+test('document_ingest accepts confirmUntyped as a boolean and rejects anything else (strict, as the server validates)', () => {
+  const base = { title: 'My doc', text: 'body', externalId: 'ext-1' };
+  assert.ok(validateStrict('document_ingest', { ...base, confirmUntyped: true }).success);
+  assert.ok(validateStrict('document_ingest', { ...base, confirmUntyped: false }).success);
+  assert.ok(!validateStrict('document_ingest', { ...base, confirmUntyped: 'yes' }).success, 'a string is not a boolean');
+  assert.ok(!validateStrict('document_ingest', { ...base, confirmUntyped: 1 }).success, 'nor is a number');
+});
+
+test('rag_ask accepts providerAlias as a non-empty string and rejects anything else (strict)', () => {
+  assert.ok(validateStrict('rag_ask', { query: 'q', providerAlias: 'my-vllm' }).success);
+  assert.ok(validateStrict('rag_ask', { query: 'q', providerAlias: 'my-vllm', model: 'llama-3-70b' }).success);
+  assert.ok(!validateStrict('rag_ask', { query: 'q', providerAlias: '' }).success, 'an empty alias is not forwarded');
+  assert.ok(!validateStrict('rag_ask', { query: 'q', providerAlias: 7 }).success);
+});
+
+test('document_ask accepts providerAlias as a non-empty string and rejects anything else (strict)', () => {
+  assert.ok(validateStrict('document_ask', { documentId: 'd1', prompt: 'q', providerAlias: 'my-vllm' }).success);
+  assert.ok(!validateStrict('document_ask', { documentId: 'd1', prompt: 'q', providerAlias: '' }).success);
+  assert.ok(!validateStrict('document_ask', { documentId: 'd1', prompt: 'q', providerAlias: false }).success);
 });
 
 test('document_ingest accepts text mode', () => {
