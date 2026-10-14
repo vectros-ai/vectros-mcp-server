@@ -6,6 +6,7 @@
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { z } from 'zod';
 import pino from 'pino';
 
@@ -24,6 +25,7 @@ import folderUpdate from '../../src/tools/folder_update.js';
 import folderDelete from '../../src/tools/folder_delete.js';
 import currentIdentity from '../../src/tools/current_identity.js';
 import documentIngest from '../../src/tools/document_ingest.js';
+import { providerAliasInput } from '../../src/tools/provider-alias.js';
 import recordCreate from '../../src/tools/record_create.js';
 import recordGet from '../../src/tools/record_get.js';
 import recordBatchGet from '../../src/tools/record_batch_get.js';
@@ -279,6 +281,32 @@ test('document_ask accepts providerAlias as a non-empty string and rejects anyth
   assert.ok(validateStrict('document_ask', { documentId: 'd1', prompt: 'q', providerAlias: 'my-vllm' }).success);
   assert.ok(!validateStrict('document_ask', { documentId: 'd1', prompt: 'q', providerAlias: '' }).success);
   assert.ok(!validateStrict('document_ask', { documentId: 'd1', prompt: 'q', providerAlias: false }).success);
+});
+
+// What an agent reads about the generation limits has to match what the platform does with the default model: the
+// models that reason count the reasoning against `maxTokens`, and the same models ignore a `temperature`.
+test('rag_ask and document_ask maxTokens say that reasoning counts against it', () => {
+  const ragMax = String(tools.rag_ask.inputSchema.maxTokens.description);
+  const askMax = String(tools.document_ask.inputSchema.maxTokens.description);
+  for (const d of [ragMax, askMax]) {
+    assert.match(d, /reason before they answer/);
+    assert.match(d, /when they do, the reasoning counts against this limit/);
+    assert.match(d, /claude-haiku-5-5/, 'names the current default model');
+  }
+});
+
+test('rag_ask temperature says the models that do not accept one ignore it', () => {
+  const d = String(tools.rag_ask.inputSchema.temperature.description);
+  assert.match(d, /ignores it for claude-haiku-5-5, claude-sonnet-5, claude-sonnet-5-5 and claude-opus-5-5/);
+  assert.match(d, /claude-haiku-4-5/, 'names a model it still applies to');
+});
+
+test('rag_ask and document_ask model say the default comes from GET /v1/models, not a fixed name', () => {
+  for (const tool of ['rag_ask', 'document_ask'] as const) {
+    const d = String(tools[tool].inputSchema.model.description);
+    assert.match(d, /defaultModel/);
+    assert.doesNotMatch(d, /tier-appropriate Haiku/, 'the stale default wording is gone');
+  }
 });
 
 test('document_ingest accepts text mode', () => {
@@ -641,6 +669,22 @@ test('folder_delete description states the emptiness precondition, including rec
   assert.match(d, /sub-folders|subfolders/i);
 });
 
+test('no tool or parameter description uses the word "partner"', () => {
+  // The description is the only thing the agent reads before it fills the arguments, and its reader
+  // is the developer's own agent: the account holder is "you", never a "partner". The check walks the
+  // tool description and every top-level parameter description.
+  for (const t of Object.values(tools)) {
+    const texts = [t.description, ...Object.values(t.inputSchema as Record<string, z.ZodTypeAny>).map((s) => s.description ?? '')];
+    for (const text of texts) assert.doesNotMatch(text, /\bpartners?\b/i, `${t.name}: ${text.slice(0, 80)}`);
+  }
+});
+
+test('folder_delete description tells the agent what to do instead of deleting a record that should be kept', () => {
+  const d = tools.folder_delete.description;
+  assert.match(d, /Do NOT read that as "the record cannot be moved" and delete the record on that basis/);
+  assert.match(d, /tell the user to move it with the Vectros API\/SDK directly/);
+});
+
 test('hybrid_search and rag_ask describe scopeFilters as mutually exclusive with scope', () => {
   // The pair is rejected together both locally (handler) and server-side. An agent
   // that reads only `scope`'s description would never discover the multi-dimension
@@ -783,5 +827,39 @@ test('scopes is described by data_scope, not by the credential identity', () => 
       /values must come from the credential's own identity/,
       `${t}: the false identity-bound claim must be gone`,
     );
+  }
+});
+
+test('providerAlias description gives both reasons for the routed 403, the second being the BAA-holder attestation', () => {
+  // `rag_ask` and `document_ask` share this one description. An agent that only knows the waiver reason tells the
+  // user to sign it, when a BAA holder who already did is blocked on an owner's attestation in the portal.
+  const description = providerAliasInput.description ?? '';
+  assert.match(description, /risk-acceptance waiver/);
+  assert.match(description, /Business Associate Agreement/);
+  assert.match(description, /attested/);
+  assert.match(description, /BAA-holder attestation/);
+  assert.match(description, /developer portal/);
+});
+
+test('rag_ask and document_ask both carry the shared providerAlias description', () => {
+  // A future inline override on one tool would drop the second 403 reason for that tool only.
+  for (const tool of [tools.rag_ask, tools.document_ask]) {
+    const shape = tool.inputSchema as Record<string, z.ZodTypeAny>;
+    assert.equal(shape.providerAlias.description, providerAliasInput.description);
+  }
+});
+
+test('neither the providerAlias description nor the README claims this server can attest a provider config', () => {
+  // No sentence may mention attesting together with the MCP or a tool, in either order: an agent reading one would
+  // look for a tool that does not exist.
+  const readme = readFileSync(new URL('../../README.md', import.meta.url), 'utf8');
+  for (const [name, text] of [['description', providerAliasInput.description ?? ''], ['README', readme]] as const) {
+    const sentences = text.split(/(?<=[.!?])\s+/);
+    assert.ok(sentences.some((s) => /attest/i.test(s)), `${name} states the attestation`);
+    for (const sentence of sentences) {
+      if (/attest/i.test(sentence)) {
+        assert.doesNotMatch(sentence, /\b(MCP|tools?)\b/i, `${name}: ${sentence}`);
+      }
+    }
   }
 });

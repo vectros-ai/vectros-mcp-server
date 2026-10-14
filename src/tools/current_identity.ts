@@ -4,12 +4,8 @@
  *
  * Thin wrapper over `resolveIdentity` from `../identity.js` — that
  * helper is also used by the `identity` resource so both surfaces
- * stay in lockstep. See the helper header for the
+ * stay in lockstep. See `resolveIdentity` for the
  * graceful-degradation contract details.
- *
- * Design contract (from the design doc § Identity &
- * exploration → current_identity + § "Backend deliverables surfaced
- * by MCP v0.2"):
  *
  * Response shape (the extended /v1/ping ships this in full today):
  * status, tenantId, environment, principalType, principalKeyId,

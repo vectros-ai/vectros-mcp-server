@@ -232,7 +232,7 @@ resolves to its main repo's `.mcp.json` — add and open from the same project.
 | Tool | What it does |
 |---|---|
 | `hybrid_search` | Hybrid BM25 + dense search across the tenant's indexed content (records + documents). Narrow by ownership (`scope` for one dimension, `scopeFilters` for several at once — e.g. one client within one org), folder, type, metadata filters, a created date window, and keyword-precision (`textMode`) / relevance floors. Returns the indexed projection of each hit. |
-| `rag_ask` | Ask a question grounded against the indexed corpus. Scope retrieval (ownership — `scope` or multi-dimension `scopeFilters` — / folder / type / metadata filters / date window) and steer generation (`instructions` / `temperature`). Streaming generation aggregated; progress notifications keep the call alive for the generation window. Optional `providerAlias` routes one call through your own model provider (see below). |
+| `rag_ask` | Ask a question grounded against the indexed corpus. Scope retrieval through `search` (ownership — `search.scope` or multi-dimension `search.scopeFilters` — / folder / type / metadata filters / date window) and steer generation (`instructions`, and `temperature` for the models that accept one). Streaming generation aggregated; progress notifications keep the call alive for the generation window. Optional `providerAlias` routes one call through your own model provider (see below). |
 | `document_ask` | Ask a question grounded against a single document. Same aggregation + progress-notification shape as `rag_ask`, including the optional `providerAlias`. |
 
 **Records** (structured, schema-validated data)
@@ -288,15 +288,22 @@ provider config's default model when omitted). The server forwards `providerAlia
 never fills it in.
 
 It works only after your account has set up the provider and signed the platform's risk-acceptance waiver. Without
-both, the platform refuses the call with a `403`, which the tool returns to you as written. A call served by your
-own provider leaves the platform-hosted Bedrock path, and Vectros's AWS BAA boundary, so decide deliberately whether a given call should use it.
-Nothing here is a statement about how a provider you chose handles your data.
+both, the platform refuses the call with a `403`, which the tool returns to you as written.
+
+If your account has accepted the Business Associate Agreement with Vectros in the developer portal, an account owner must also attest each provider
+config in the developer portal (**Model Providers**) before a call can use it. Until then the platform refuses the
+call with a `403` that says it needs a BAA-holder attestation. The owner does this in the portal; nothing in this
+server does it.
+
+A call served by your own provider leaves the platform-hosted Bedrock path, and Vectros's AWS BAA boundary, so
+decide deliberately whether a given call should use it. Nothing here is a statement about how a provider you chose handles your data.
 
 ### Opting into a subset
 
-Pass `VECTROS_MCP_TOOLS=hybrid_search,rag_ask` to register only those
-two — useful for giving an agent read-only search access without
-exposing ingestion or inference costs to the credential. Unknown tool
+Pass `VECTROS_MCP_TOOLS=hybrid_search,record_query,record_get` to register only those
+three — useful for giving an agent read-only access without
+exposing ingestion or inference costs to the credential. Add `rag_ask` or `document_ask`
+only if the credential should be able to spend inference balance. Unknown tool
 names fail fast at startup.
 
 ## Resources
@@ -321,12 +328,11 @@ server emits a `warn` log line on startup when you pass a wildcard
 **The easiest way to get one is `npx -y @vectros-ai/cli bootstrap` (above)**
 — it mints a least-privilege `ssk_*` and an AccessProfile for you, no root
 key required. To do it by hand instead: mint a scoped key from the developer
-portal under **Keys → Create scoped key**, bind it to an AccessProfile
-titled `mcp-read-all` or `mcp-read-scoped`, and drop the resulting
+portal under **Keys → Create scoped key**, bind it to a read-only AccessProfile
+(any name, for example `mcp-read`), and drop the resulting
 `ssk_live_...` into the config above.
 
-See the Vectros developer documentation on scoped tokens ("Recommended
-AccessProfile for MCP") for least-privilege credential setup — the
+See the Vectros developer documentation on scoped tokens for least-privilege credential setup — the
 `vectros bootstrap` flow provisions a scoped `ssk_*` key and its AccessProfile
 in one command.
 
@@ -361,7 +367,7 @@ The server resolves its API key from the first source that yields one:
 
 The resolved key is held in memory and never logged. Startup logs which alias it
 resolved (not the key), so you can tell at a glance which identity the server is
-running as — `vectros keyring doctor` shows the same view.
+running as — `vectros keyring doctor` (CLI 0.10.0+) shows the same view.
 
 > **Startup warns when it picks an identity you didn't name.** If `VECTROS_API_KEY`
 > is unset and no `VECTROS_KEYRING_ALIAS` is set, the server falls back to your
@@ -371,7 +377,7 @@ running as — `vectros keyring doctor` shows the same view.
 > blank placeholder (`"VECTROS_API_KEY": ""` in a client config, or `-e VECTROS_API_KEY`
 > passing through an unset var in Docker) reads as "not configured yet" but resolves
 > like an unset key. Nothing is blocked — name an entry with `VECTROS_KEYRING_ALIAS`,
-> or set `VECTROS_API_KEY`, and the warning goes away. `vectros keyring doctor` shows
+> or set `VECTROS_API_KEY`, and the warning goes away. `vectros keyring doctor` (CLI 0.10.0+) shows
 > which entry is active and which of your keys are live.
 
 ## Environment variables
@@ -511,8 +517,8 @@ The server is on a pre-1.0 track toward a stable 1.0 release.
 ## Rate limits
 
 Tool calls hit the same per-minute rate limits as any API client; the
-[rate limits guide](https://docs.vectros.ai/guides/operations-trust/rate-limits) says which requests count. On a `429` the server surfaces the error with its
-`Retry-After` hint so the agent can pace and retry rather than blind-retrying. The guide also lists
+[rate limits guide](https://docs.vectros.ai/guides/operations-trust/rate-limits) says which requests count. On a `429` the tool returns the error with `HTTP 429` and `errorCode: RATE_LIMITED`, so the agent can pace and retry
+rather than blind-retrying. The guide also lists
 the per-plan limits.
 
 ## Building from source

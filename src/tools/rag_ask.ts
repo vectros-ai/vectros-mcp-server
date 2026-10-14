@@ -10,9 +10,6 @@
  *   2. Per `content_delta` we emit an MCP `notifications/progress`
  *      to keep the JSON-RPC connection warm so the client doesn't
  *      timeout the tool call before we return.
- *
- * See the design doc § "Long-running tool calls" for
- * the architectural rule.
  */
 import { z } from 'zod';
 import type { Vectros } from '@vectros-ai/sdk';
@@ -42,8 +39,8 @@ const inputSchema = {
     .string()
     .optional()
     .describe(
-      'Inference model alias (e.g. claude-haiku-4-5, claude-sonnet-5, claude-opus-5-5). ' +
-        'Default = tier-appropriate Haiku. See GET /v1/models for the catalog the calling key can reach. ' +
+      'Inference model alias (e.g. claude-haiku-5-5, claude-sonnet-5-5, claude-opus-5-5). ' +
+        'Omit it to use the platform default, which GET /v1/models reports as `defaultModel`; that endpoint also lists the catalog the calling key can reach. ' +
         'When `providerAlias` is set, this instead names the model on that provider\'s own id space.',
     ),
   providerAlias: providerAliasInput,
@@ -118,13 +115,26 @@ const inputSchema = {
     })
     .optional()
     .describe('Retrieval params + scoping. Default mode HYBRID, limit ' + SEARCH_MCP_DEFAULT_LIMIT + '.'),
-  maxTokens: z.number().int().min(1).optional().describe('Max output tokens.'),
+  maxTokens: z
+    .number()
+    .int()
+    .min(1)
+    .optional()
+    .describe(
+      'Max output tokens. claude-haiku-5-5, claude-sonnet-5, claude-sonnet-5-5 and claude-opus-5-5 can reason before they answer; ' +
+        'when they do, the reasoning counts against this limit, so a small value can return little or no text. ' +
+        'Leave headroom: 1024 or more for a short answer.',
+    ),
   temperature: z
     .number()
     .min(0)
     .max(1)
     .optional()
-    .describe('Sampling temperature (0.0–1.0). Default 0.3 — lower favors deterministic, retrieval-grounded answers.'),
+    .describe(
+      'Sampling temperature (0.0–1.0). Default 0.3 — lower favors deterministic, retrieval-grounded answers. ' +
+        'The platform ignores it for claude-haiku-5-5, claude-sonnet-5, claude-sonnet-5-5 and claude-opus-5-5, which sample at their own default; ' +
+        'it applies to models that accept a temperature, such as claude-haiku-4-5.',
+    ),
 };
 
 const ragAsk: ToolFactory = ({ client, log }) => ({
@@ -136,7 +146,7 @@ const ragAsk: ToolFactory = ({ client, log }) => ({
     'and streams a model answer back. Scope retrieval with `search` (ownership — `scope` for one ownership ' +
     'dimension or `scopeFilters` for several at once, e.g. one client within one org — folder, type, metadata ' +
     'filters, date window) to ground on a subset — e.g. one patient or one folder — and steer generation with ' +
-    '`instructions` / `temperature`. The full answer is returned as a single response; ' +
+    '`instructions` (and `temperature`, for the models that accept one). The full answer is returned as a single response; ' +
     'progress notifications keep the call alive during the 30-45s generation window. ' +
     'Calls without `providerAlias` are served by platform-hosted AWS Bedrock. A call that sets `providerAlias` ' +
     'goes to your own model provider, outside Vectros\'s AWS BAA boundary.',

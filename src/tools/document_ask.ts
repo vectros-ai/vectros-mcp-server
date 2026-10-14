@@ -23,12 +23,21 @@ const inputSchema = {
     .string()
     .optional()
     .describe(
-      'Inference model alias. Default = tier-appropriate Haiku. ' +
-        'See GET /v1/models for the catalog the calling key can reach. ' +
+      'Inference model alias. Omit it to use the platform default, which GET /v1/models reports as `defaultModel`; ' +
+        'that endpoint also lists the catalog the calling key can reach. ' +
         'When `providerAlias` is set, this instead names the model on that provider\'s own id space.',
     ),
   providerAlias: providerAliasInput,
-  maxTokens: z.number().int().min(1).optional().describe('Max output tokens.'),
+  maxTokens: z
+    .number()
+    .int()
+    .min(1)
+    .optional()
+    .describe(
+      'Max output tokens. claude-haiku-5-5, claude-sonnet-5, claude-sonnet-5-5 and claude-opus-5-5 can reason before they answer; ' +
+        'when they do, the reasoning counts against this limit, so a small value can return little or no text. ' +
+        'Leave headroom: 1024 or more for a short answer.',
+    ),
 };
 
 const documentAsk: ToolFactory = ({ client, log }) => ({

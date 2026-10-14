@@ -3,6 +3,33 @@
 All notable changes to `@vectros-ai/mcp-server` are documented here.
 This project adheres to [Semantic Versioning](https://semver.org).
 
+## 0.18.1 — 2026-10-12
+
+### Changed
+
+- **`folder_delete` tells the agent to keep a record it cannot re-file, and the `sk_*` startup warning points at
+  things you can find.** The `folder_delete` description says not to delete a record just because this server cannot
+  move it, and to tell the user to move it with the Vectros API or SDK instead. The warning logged for a wildcard `sk_*` key names the
+  command that mints a scoped key (`npx -y @vectros-ai/cli bootstrap`) and the README's "Recommended credential"
+  section.
+- **`rag_ask` and `document_ask` name another reason a routed call (`providerAlias`) is refused with a `403`.**
+  Besides an unknown or inactive alias and a risk waiver your account has not signed, an account that has accepted the
+  Business Associate Agreement with Vectros in the developer portal also needs an account owner to attest each provider
+  config in the portal (Model Providers). Until then the platform refuses the call with a `403` that says it needs a
+  BAA-holder attestation. The `providerAlias` description and the README section on routing a call through your own
+  provider say so; nothing in this server records the attestation.
+- **`rag_ask` and `document_ask` describe the generation limits as the platform applies them.** The platform's default
+  model is `claude-haiku-5-5`. It, `claude-sonnet-5`, `claude-sonnet-5-5` and `claude-opus-5-5` can reason before they
+  answer, and when they do the reasoning counts against `maxTokens`, so a small `maxTokens` can return little or no
+  text; the `maxTokens` description says so and suggests 1024 or more for a short answer. The same four models ignore a
+  `temperature`, so the `rag_ask` `temperature` description says it applies only to models that accept one, such as
+  `claude-haiku-4-5`. The `model` descriptions point to `defaultModel` in `GET /v1/models` instead of naming a default.
+  Only the descriptions change; what the tools send is the same.
+- **The server is built against SDK 0.47.0.** During a long streamed answer the platform now sends a `: keepalive`
+  comment line about every 15 seconds; the server ignores it and the tools return the same answers.
+- **Source comments state their rules themselves.** Comments that pointed at an internal design document
+  now say what the rule is, so the source maps that ship with the package read on their own. No behavior changes.
+
 ## 0.18.0 — 2026-10-01
 
 ### Added

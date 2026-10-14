@@ -54,6 +54,15 @@ test('warnOnSuboptimalKey warns on sk_*', () => {
   assert.match(warnings[0].msg, /wildcard-scope/);
 });
 
+test('the sk_* warning points at things a reader of the published package can find', () => {
+  const { log, warnings } = captureLogger();
+  warnOnSuboptimalKey(parseApiKey('sk_live_abc'), log);
+  const msg = warnings[0].msg;
+  assert.match(msg, /npx -y @vectros-ai\/cli bootstrap/, 'names the command that mints a scoped key');
+  assert.match(msg, /"Recommended credential" section of this package's README/, 'names a section that exists in the README');
+  assert.doesNotMatch(msg, /Recommended AccessProfile for MCP/, 'no pointer to a documentation section that is not published');
+});
+
 test('warnOnSuboptimalKey warns on st_*', () => {
   const { log, warnings } = captureLogger();
   warnOnSuboptimalKey(parseApiKey('st_test_abc'), log);

@@ -3,12 +3,11 @@
  *
  * Used by BOTH `current_identity` tool AND `identity` resource —
  * single source of truth for the graceful-degradation contract (see
- * the design doc § Identity & exploration →
- * current_identity + § "Backend deliverables surfaced by MCP v0.2").
+ * {@link resolveIdentity}).
  *
  * Bypasses the SDK because `client.auth.ping()` is typed
- * `Promise<void>` and discards the response body — see
- * src/tools/current_identity.ts header for the full reasoning.
+ * `Promise<void>` and discards the response body, so the extended
+ * `/v1/ping` fields would never reach us.
  */
 import type { Logger } from './log.js';
 import { BUILD_INFO } from './build-info.js';

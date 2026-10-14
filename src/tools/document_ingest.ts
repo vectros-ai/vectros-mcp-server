@@ -10,8 +10,7 @@
  *
  * Either `text` or `filePath` MUST be present; both is an error.
  *
- * **Transport asymmetry (locked v0.2 design — see
- * the design doc § Documents → document_ingest):**
+ * **Transport asymmetry (by design):**
  *
  *   stdio transport:
  *     - `text`     → ingestDocument()

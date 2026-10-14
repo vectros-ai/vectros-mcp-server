@@ -70,8 +70,9 @@ export function warnOnSuboptimalKey(key: KeyInfo, log: Logger): void {
     log.warn(
       { prefix: key.prefix, env: key.env },
       'wildcard-scope key (sk_*) on a desktop MCP server is overly broad. ' +
-        'For production, prefer a scoped ssk_* key bound to a narrowed AccessProfile. ' +
-        'See the Vectros scoped-token documentation ("Recommended AccessProfile for MCP").',
+        'For production, prefer a scoped ssk_* key bound to a narrowed AccessProfile: ' +
+        '`npx -y @vectros-ai/cli bootstrap` mints one, and the "Recommended credential" section of ' +
+        'this package\'s README describes it.',
     );
   } else if (key.prefix === 'st') {
     log.warn(

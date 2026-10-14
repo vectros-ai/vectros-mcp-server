@@ -17,8 +17,6 @@
  * whose text is not retained. We handle this gracefully — surface
  * `textAvailable: false` in the response so the agent knows
  * `document_ask` is the right next step instead of returning isError.
- *
- * See the design doc § Documents → document_get.
  */
 import { z } from 'zod';
 import type { ToolFactory, ToolResult } from './types.js';

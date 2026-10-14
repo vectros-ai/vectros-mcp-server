@@ -43,8 +43,8 @@ const folderDelete: ToolFactory = ({ client, log }) => ({
     'folderId) or deleted. A RECORD can also be re-filed into another folder — the API supports it — but ' +
     'THIS SERVER does not expose that yet: record_update has no folderId argument, so from here your only ' +
     'option is record_delete (needs records:d). Do NOT read that as "the record cannot be moved" and ' +
-    'delete partner data on that basis: if the record should be kept, move it with the Vectros API/SDK ' +
-    'directly rather than deleting it here. A sub-folder cannot be re-parented at all, so nested folders ' +
+    'delete the record on that basis: if the record should be kept, tell the user to move it with the ' +
+    'Vectros API/SDK directly rather than deleting it here. A sub-folder cannot be re-parented at all, so nested folders ' +
     'have to be emptied and deleted innermost-first. Note the emptiness check counts everything in the ' +
     'folder, INCLUDING items your ' +
     'credential cannot read — so a refusal you cannot account for from what you can list is expected ' +

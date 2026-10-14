@@ -26,8 +26,7 @@
  *      result envelope (`done` minus its discriminator → `usage`).
  *   4. Emits each `content_delta` as an MCP progress notification
  *      via the `onProgress` callback so the MCP client doesn't
- *      timeout the tool call on a 30-45s RAG generation. See
- *      the design doc § "Long-running tool calls".
+ *      timeout the tool call on a 30-45s RAG generation.
  *
  * The helper is decoupled from the MCP SDK — the `onProgress`
  * callback is wired by the tool implementation against the

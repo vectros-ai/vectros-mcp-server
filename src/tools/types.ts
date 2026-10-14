@@ -133,7 +133,7 @@ export interface ToolFactoryContext {
    *
    * Only `document_ingest` uses this — to reject `filePath` mode on
    * HTTP transport (remote MCP server can't touch the partner's
-   * local filesystem; design doc § Documents → document_ingest).
+   * local filesystem).
    * Undefined treated as 'stdio' (the v0.1 default).
    */
   transport?: 'stdio' | 'http';

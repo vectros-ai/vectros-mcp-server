@@ -8,8 +8,7 @@
  * Transport (stdio for v0.1) is connected separately via
  * `server.connect(transport)`. The CLI entry wires stdio.
  *
- * Public surface — see the design doc § "Configuration"
- * for the constructor-options shape.
+ * Public surface — the constructor options are {@link VectrosMCPServerOptions}.
  */
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { VectrosClient } from '@vectros-ai/sdk';
@@ -76,8 +75,8 @@ export interface VectrosMCPServerOptions {
   resources?: ResourceName[];
   /**
    * Vectros API base URL. Default: https://api.vectros.ai. The SDK
-   * calls this `environment`; we keep the docs-aligned name on our
-   * surface to match the design doc.
+   * calls this `environment`; we keep the more descriptive `apiBaseUrl`
+   * on our surface.
    */
   apiBaseUrl?: string;
   /** Provide a logger to capture server output. Default: pino → stderr. */

@@ -4,7 +4,7 @@
  * `vectros-mcp-server`. Reads env vars, spawns the server over
  * stdio, runs until the client disconnects.
  *
- * Env vars (see the design doc § "Configuration"):
+ * Env vars:
  *   VECTROS_API_KEY                  the ssk_live_... key to run with. Optional
  *                                    ONLY when the vectros CLI is installed: if
  *                                    unset, the key is resolved from the CLI

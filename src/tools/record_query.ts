@@ -51,7 +51,7 @@
  *
  * Result limits + pagination (the enumeration-limits contract, applied to every enumeration tool):
  *   • DEFAULT 3 — a low ceiling that protects the agent context window, since records
- *     inject directly into it (token economy; see the design doc § "Token economy").
+ *     inject directly into it (token economy).
  *   • MAX 100 — the records API max. An agent that accepts the context cost can raise
  *     `limit` to pull a larger page in a single call; it is never forced to paginate.
  *   • PAGINATION — both list and lookup are cursor-paged. The result is the
