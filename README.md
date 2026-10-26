@@ -279,6 +279,19 @@ All 23 tools wrap published Vectros HTTP API endpoints. JSON
 responses are what the agent sees as tool output. Per-call cost
 surfaces via the `usage` field on inference responses.
 
+**Concurrent updates.** `record_update`, `document_update`, `folder_update` and `document_ingest` with `upsert: true`
+return `409` (`errorCode: VERSION_CONFLICT`) when another request changed the same item at the same moment, whether or not
+you pass `expectedVersion`. Nothing is written and the other change is kept: re-read the item and retry.
+`expectedVersion` still refuses an update made against a version you read earlier, even if the other change finished long
+ago. An update to an item that was deleted a moment earlier returns `404`. In `record_batch_write` with `upsert`, an item
+that meets another change at the same moment is reported in the results with `status: conflict` and
+`errorCode: VERSION_CONFLICT`; send that item again. Items written with `atomicity: all_or_nothing` are not covered.
+
+**Items of a deleted schema.** An item whose schema no longer exists is not served: reading it (`record_get`,
+`document_get`) returns an error, updating it, reading its `version_history`, and reading a document's text, download or
+answers (`document_ask`) are refused, and `record_query`, `document_query` and `record_batch_get` leave it out. Delete the
+item.
+
 ### Routing a call through your own model provider
 
 `rag_ask` and `document_ask` take an optional `providerAlias`: the alias of a model provider config your Vectros
@@ -288,7 +301,11 @@ provider config's default model when omitted). The server forwards `providerAlia
 never fills it in.
 
 It works only after your account has set up the provider and signed the platform's risk-acceptance waiver. Without
-both, the platform refuses the call with a `403`, which the tool returns to you as written.
+both, the platform refuses the call with a `403`, which the tool returns to you as written. When the waiver is the
+cause, the `403` carries an `errorCode` that says which case it is: `WAIVER_NOT_SIGNED` (the waiver has not been
+signed), `WAIVER_TEXT_CHANGED` (it was signed, but its text changed afterwards, so the earlier signature no longer
+counts) or `WAIVER_REVOKED` (an account owner revoked it). An account owner resolves each in the developer portal
+(**Model Providers**); retrying the call does not help.
 
 If your account has accepted the Business Associate Agreement with Vectros in the developer portal, an account owner must also attest each provider
 config in the developer portal (**Model Providers**) before a call can use it. Until then the platform refuses the
@@ -517,8 +534,12 @@ The server is on a pre-1.0 track toward a stable 1.0 release.
 ## Rate limits
 
 Tool calls hit the same per-minute rate limits as any API client; the
-[rate limits guide](https://docs.vectros.ai/guides/operations-trust/rate-limits) says which requests count. On a `429` the tool returns the error with `HTTP 429` and `errorCode: RATE_LIMITED`, so the agent can pace and retry
-rather than blind-retrying. The guide also lists
+[rate limits guide](https://docs.vectros.ai/guides/operations-trust/rate-limits) says which requests count. On a rate-limit `429` the tool returns the error with `HTTP 429` and `errorCode: RATE_LIMITED`, so the agent can pace and retry
+rather than blind-retrying. `rag_ask` and `document_ask` can also return `429` with `errorCode: BALANCE_BUSY` (your pre-paid
+balance is momentarily busy with your other concurrent requests: not a rate limit and not a shortage, so do not top up;
+retry shortly) or `503` with `errorCode: BALANCE_UNAVAILABLE` (a temporary fault interrupted the balance step; also not a
+shortage; retry shortly). A `402` means the balance is short (`INSUFFICIENT_BALANCE`) or the plan's usage limit is reached (`SUBSCRIPTION_LIMIT_EXCEEDED`). A `503` with no `errorCode` on a call that names a `providerAlias` means the platform cannot open the stored provider key: retry shortly, and enter the key again in the developer portal if it persists. The tool returns the message, `errorCode` and
+`requestId`, not the `Retry-After` header. The guide also lists
 the per-plan limits.
 
 ## Building from source

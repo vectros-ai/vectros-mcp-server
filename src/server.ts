@@ -42,7 +42,7 @@ const DEFAULT_ENVIRONMENT = 'https://api.vectros.ai';
 /**
  * Format a zod validation failure into an agent-actionable message. An unknown
  * top-level argument (the strict-mode `unrecognized_keys` issue) is called out by
- * name alongside the tool's valid argument list — so a cold agent that invented an
+ * name alongside the tool's valid argument list — so an agent that invents an
  * arg (e.g. a `filter` object) learns the offending key AND what it should have sent,
  * instead of getting a wrong-but-plausible result. Other issues (missing required,
  * wrong type) fall through to zod's own message.

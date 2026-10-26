@@ -14,7 +14,7 @@
  *
  * Optimistic concurrency: pass the `version` you last read as `expectedVersion`.
  * If the folder changed since, the server rejects with a 409 conflict (re-read
- * via folder_query and retry). Omit for last-write-wins.
+ * via folder_query and retry). Without `expectedVersion` an update still fails with a 409 when it meets another change to the same item at the same moment.
  *
  * Requires the credential to allow `folders:u`.
  */
@@ -42,7 +42,7 @@ const inputSchema = {
     .optional()
     .describe(
       'Optimistic concurrency: the version you last read. If the folder changed since, the update is refused ' +
-        'as a conflict (re-read and retry). Omit for last-write-wins.',
+        'as a conflict (re-read and retry). Omit it to update whatever version is current: an update that meets another change to the same folder at the same moment is still refused as a conflict.',
     ),
 };
 

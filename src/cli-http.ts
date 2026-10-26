@@ -144,8 +144,8 @@ async function main(): Promise<void> {
   }
 
   // See cli.ts for the full account of why this is registered AFTER a
-  // successful startHttpTransport() and not before — the OWNER-RULED design
-  // decision, and why the seemingly-simpler "register early, make
+  // successful startHttpTransport() and not before — a deliberate design
+  // constraint (registering early was tried twice and reverted both times), and why the seemingly-simpler "register early, make
   // shutdown() exitCode-safe" alternative doesn't work (the /v1/ping fetch
   // startHttpTransport awaits internally has no timeout/abort, so that
   // alternative trades this exact crash for a possible silent hang).

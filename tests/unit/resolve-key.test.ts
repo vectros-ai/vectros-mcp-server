@@ -164,8 +164,7 @@ test('mapExecResult: exit 1 (entry found, secret unreadable) → no-usable-key, 
 });
 
 test('mapExecResult: other exit codes → error carrying the redacted detail', () => {
-  // Assert the DETAIL, not just the status — the previous version of this test
-  // checked only `status === 'error'` while claiming to check the detail.
+  // Assert the DETAIL, not just the status: the status alone would not prove the redaction.
   const outcome = mapExecResult(execErr(127, 'boom ssk_live_LEAK99'), '', '');
   assert.equal(outcome.status, 'error');
   const detail = (outcome as { detail: string }).detail;
@@ -461,9 +460,8 @@ test('defaultRunHelper surfaces the child stderr as a redacted detail', async ()
 // ── noKeyMessage ──────────────────────────────────────────────────────────
 
 test('noKeyMessage names both escape hatches for EVERY reason, bad-alias included', () => {
-  // bad-alias used to be excluded from this loop and given a weaker assertion —
-  // encoding the exception in the test instead of fixing the message, which left
-  // the one branch the docblock's "every branch" claim was false for.
+  // bad-alias is in this loop with the same assertion as every other reason, so the
+  // docblock's "every branch" claim holds for each branch rather than carrying an exception.
   for (const reason of ['cli-absent', 'no-usable-key', 'helper-failed', 'bad-alias'] as const) {
     const msg = noKeyMessage({ source: 'none', reason, detail: 'x' });
     assert.match(msg, /VECTROS_API_KEY/, `${reason} message should mention the env var`);

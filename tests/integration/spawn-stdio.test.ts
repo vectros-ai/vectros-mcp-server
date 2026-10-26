@@ -113,9 +113,9 @@ test('spawn stdio server + handshake + list_tools', async () => {
     );
     // Broader, cheap check for the rest of the fleet: every `*_delete` tool, by name,
     // is unambiguously destructive — a name-substring rule with zero exceptions in
-    // the current 23-tool set. This closes part of the gap the other two exact-shape
-    // spot-checks leave (they only cover 2 of 23; a copy-paste error on any of the
-    // other 21 would otherwise pass this suite silently).
+    // the tool set. This closes part of the gap the other two exact-shape
+    // spot-checks leave (they only cover two tools; a copy-paste error on any other
+    // tool would otherwise pass this suite silently).
     for (const t of tools.tools ?? []) {
       if (t.name.endsWith('_delete')) {
         assert.equal(t.annotations!.readOnlyHint, false, `${t.name}: a delete tool must never be read-only`);
@@ -123,16 +123,15 @@ test('spawn stdio server + handshake + list_tools', async () => {
       }
     }
     // The `_delete` name-substring rule above only pins ONE direction (destructive tools
-    // must not be read-only) for ONE naming pattern. Nothing previously pinned the
-    // OPPOSITE direction — a true read must actually BE `readOnlyHint:true` — nor covered
-    // the non-`*_delete` write tools at all: flipping `record_create` (or any of the other
-    // five) to `readOnlyHint:true` would have passed this suite silently before this
-    // addition. Two explicit, named lists close both gaps — a copy-paste or one-line
-    // annotation error on any tool in either list now fails this test by name, not just
+    // must not be read-only) for ONE naming pattern. It says nothing about the
+    // OPPOSITE direction — a true read must actually BE `readOnlyHint:true` — nor about
+    // the non-`*_delete` write tools at all: flipping `record_create` (or any other
+    // write tool) to `readOnlyHint:true` would pass silently. Two explicit, named lists close
+    // both gaps — a copy-paste or one-line
+    // annotation error on any tool in either list fails this test by name, not just
     // the `*_delete` subset. (`folder_create` sits in the write list, not the idempotent
     // "safe create" bucket its name suggests — see its own annotation comment for why:
-    // its default no-`slug` path is NOT idempotent — a defect this suite's own prior
-    // version failed to catch.)
+    // its default no-`slug` path is NOT idempotent.)
     const READ_TOOLS = [
       'hybrid_search',
       'record_query',
@@ -213,9 +212,9 @@ test('tools/call dispatch fails closed: unknown tool + invalid args (no SDK call
     // An out-of-range `limit` fails zod BEFORE any SDK call. The 'Invalid arguments'
     // message (not a network error against the fake key) proves the
     // request→validate→reject path short-circuits the dispatch.
-    // (This used to pass `{}`, which stopped being schema-invalid in 0.17.0 when
-    // `type` became optional so list mode could select by `folderId`/`recent`. The
-    // branch under test is zod rejection, so it needs an argument zod still rejects.)
+    // (Not `{}`: that is schema-valid because `type` is optional, so list mode can
+    // select by `folderId`/`recent`. The branch under test is zod rejection, so it
+    // needs an argument zod still rejects.)
     const badArgs = await client.callTool({ name: 'record_query', arguments: { type: 'control', limit: 999 } });
     assert.equal(badArgs.isError, true, 'invalid args → isError');
     assert.match(JSON.stringify(badArgs.content), /Invalid arguments/);
@@ -228,10 +227,10 @@ test('tools/call dispatch fails closed: unknown tool + invalid args (no SDK call
     assert.match(JSON.stringify(noMode.content), /folderId/);
     assert.match(JSON.stringify(noMode.content), /recent/);
 
-    // The highest-severity cold-agent trap found in review: an INVENTED top-level arg
-    // must ERROR, not silently fall through to a default mode. Before strict validation,
-    // `record_query {type, filter:{…}}` dropped `filter` and ran in list mode, returning
-    // wrong-but-plausible results. Now it is rejected, naming the offending key + the
+    // The highest-severity agent trap: an INVENTED top-level arg must ERROR, not silently
+    // fall through to a default mode. Without strict validation,
+    // `record_query {type, filter:{…}}` would drop `filter` and run in list mode, returning
+    // wrong-but-plausible results. It is rejected, naming the offending key + the
     // valid argument list so the agent self-corrects.
     const strayArg = await client.callTool({
       name: 'record_query',
@@ -246,7 +245,7 @@ test('tools/call dispatch fails closed: unknown tool + invalid args (no SDK call
 });
 
 test('CLI fails fast when no key resolves (no env key, no keyring match)', async () => {
-  // An unset VECTROS_API_KEY no longer means "fail" — it means "fall back to the
+  // An unset VECTROS_API_KEY does not mean "fail" — it means "fall back to the
   // CLI keyring helper". So pin an alias that cannot resolve, which is
   // deterministic on ANY machine: with the CLI installed the helper exits 2 (no
   // such entry), without it the helper reports the CLI absent. Both leave the
@@ -312,10 +311,10 @@ test('CLI exits 2 (not hangs) when startup ping validation fails (sibling of the
       ...process.env,
       // Real prefix, fake suffix — see resolve-key.ts: no local length/format
       // check, so this reaches the real /v1/ping call and gets a genuine 403.
-      // Keep the suffix under 28 chars: pipelines/public_mirror_scrub.sh's
-      // secret pattern is `(sk|ssk)_(live|test)_[A-Za-z0-9_-]{28,}` — a
-      // longer, more verbose "obviously fake" suffix here previously tripped
-      // the publish-stage scrub as a false positive on a public-mirrored
+      // Keep the suffix under 28 chars: the publish-stage secret scrub's
+      // pattern is `(sk|ssk)_(live|test)_[A-Za-z0-9_-]{28,}` — a
+      // longer, more verbose "obviously fake" suffix here would trip
+      // the scrub as a false positive on a public-mirrored
       // package. Fix the fixture, not the scrub pattern or the allowlist —
       // this is code we can change, not vetted third-party content.
       VECTROS_API_KEY: 'ssk_live_not-a-real-key',

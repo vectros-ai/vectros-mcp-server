@@ -85,3 +85,24 @@ test('consumeStream handles empty stream', async () => {
   assert.equal(result.answer, '');
   assert.equal(result.usage, undefined);
 });
+
+// SDK 0.48.0 adds a `reasoning_delta` event, sent only when a request sets `reasoning` to `stream`. The tools never set
+// it, but the reader must skip an event it does not list rather than fold it into the answer or fail.
+test('consumeStream skips reasoning_delta: not in the answer, no progress notification, no error', async () => {
+  const reasoning = { event: 'reasoning_delta', delta: 'Let me think. ' } as unknown as SseEvent;
+  const stream = gen(
+    reasoning,
+    { event: 'content_delta', delta: 'Answer.' },
+    reasoning,
+    { event: 'done', inputTokens: 3, outputTokens: 4, model: 'm' },
+  );
+  const progress: Array<{ text: string; total: number }> = [];
+  const result = await consumeStream(stream, async (chunk) => {
+    progress.push(chunk);
+  });
+  assert.equal(result.answer, 'Answer.');
+  assert.deepEqual(progress, [{ text: 'Answer.', total: 7 }]);
+  assert.deepEqual(result.usage, { inputTokens: 3, outputTokens: 4, model: 'm' });
+  assert.equal(result.searchResults, undefined);
+  assert.equal(result.documentContext, undefined);
+});

@@ -64,10 +64,8 @@ const folderCreate: ToolFactory = ({ client, log }) => ({
   // freshly-proved-free value, so the idempotency check running after that derivation can never
   // match on the default path. `slug` is optional, so this is annotated for the less-safe default —
   // the same standard applied to record_create/document_ingest/record_batch_write's identical
-  // optional-dedupe-key shape. (A prior version of this annotation claimed unconditional
-  // idempotency, reasoning that the derived slug made this tool "genuinely structurally different"
-  // from the optional-externalId tools — that reasoning was wrong: the derivation is unconditional,
-  // but it is unconditionally NON-colliding by construction, which is the opposite property.)
+  // optional-dedupe-key shape. (The slug derivation being unconditional does not make the tool
+  // idempotent: it is unconditionally NON-colliding by construction, which is the opposite property.)
   annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false },
   handler: async (args): Promise<ToolResult> => {
     try {

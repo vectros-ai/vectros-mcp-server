@@ -19,11 +19,11 @@ const identityResource: ResourceFactory = ({ log, apiKey, environment }) => ({
   description:
     'The tenant + principal scope the MCP server is authenticated as. Returns the same payload as the ' +
     '`current_identity` tool: status, tenantId, environment, principalType, principalKeyId, principalLabel, ' +
-    '(for scoped credentials) allowedActions + dataScope ({ userId, scopes[] }). Note: this does not yet ' +
+    '(for scoped credentials) allowedActions + dataScope ({ userId, scopes[] }). Note: this does not ' +
     'include granted_capabilities (member-lifecycle / forensic-read / context-directory-read / ' +
-    'delegate-mint, as of API 0.40.0, joined by delegate-principal-stamp in 0.42.0) — a separate ' +
+    'delegate-mint, as of API 0.40.0, joined by delegate-principal-stamp in 0.42.0 and trigger-control-plane-grant in 0.44.0) — a separate ' +
     'reach dimension a scope clause can carry that /v1/ping ' +
-    'does not report yet, so allowedActions+dataScope may understate a credential\'s true reach. Also ' +
+    'does not report, so allowedActions+dataScope may understate a credential\'s true reach. Also ' +
     'reports mcpServerVersion and sdkVersion (this build\'s own version and the bundled @vectros-ai/sdk ' +
     'version). The /v1/ping backing call ships the extended shape today; the version fields are always ' +
     'client-derived.',

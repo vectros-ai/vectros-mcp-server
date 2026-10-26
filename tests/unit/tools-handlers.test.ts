@@ -976,6 +976,90 @@ test('rag_ask returns the platform 403 for an unknown or not-yet-enabled provide
   assert.match(r.content[0].text, /Provider alias is not active for this account\./, 'and the platform message, unaltered');
 });
 
+for (const errorCode of ['WAIVER_NOT_SIGNED', 'WAIVER_TEXT_CHANGED', 'WAIVER_REVOKED']) {
+  test(`rag_ask returns the platform's ${errorCode} refusal with its errorCode`, async () => {
+    const client = {
+      inference: {
+        ragInference: async () => {
+          const e = new Error('ForbiddenError') as Error & { statusCode: number; body: unknown };
+          e.statusCode = 403;
+          e.body = { message: 'Provider alias my-vllm requires the provider waiver.', errorCode, requestId: 'req-2' };
+          throw e;
+        },
+      },
+    } as never;
+    const tool = ragAsk({ client, log });
+    const r = await tool.handler({ query: 'q', providerAlias: 'my-vllm' }, {});
+    assert.equal(r.isError, true);
+    assert.match(r.content[0].text, new RegExp(`HTTP 403 \\(${errorCode}\\)`), 'the code is in the summary line');
+    assert.match(r.content[0].text, new RegExp(`errorCode: ${errorCode}`), 'and on its own line for the agent to read');
+    assert.match(r.content[0].text, /requires the provider waiver/, 'with the platform message unaltered');
+  });
+}
+
+const refusals: Array<{ statusCode: number; errorCode: string }> = [
+  { statusCode: 429, errorCode: 'BALANCE_BUSY' },
+  { statusCode: 503, errorCode: 'BALANCE_UNAVAILABLE' },
+];
+for (const { statusCode, errorCode } of refusals) {
+  test(`rag_ask returns the ${statusCode} ${errorCode} refusal with its errorCode`, async () => {
+    const client = {
+      inference: {
+        ragInference: async () => {
+          const e = new Error('refused') as Error & { statusCode: number; body: unknown };
+          e.statusCode = statusCode;
+          e.body = { message: 'Your balance is not short; retry shortly.', errorCode, requestId: 'req-3' };
+          throw e;
+        },
+      },
+    } as never;
+    const r = await ragAsk({ client, log }).handler({ query: 'q' }, {});
+    assert.equal(r.isError, true);
+    assert.match(r.content[0].text, new RegExp(`HTTP ${statusCode} \\(${errorCode}\\)`));
+    assert.match(r.content[0].text, new RegExp(`errorCode: ${errorCode}`));
+    assert.match(r.content[0].text, /Your balance is not short; retry shortly\./);
+  });
+
+  test(`document_ask returns the ${statusCode} ${errorCode} refusal with its errorCode`, async () => {
+    const client = {
+      inference: {
+        documentAsk: async () => {
+          const e = new Error('refused') as Error & { statusCode: number; body: unknown };
+          e.statusCode = statusCode;
+          e.body = { message: 'Your balance is not short; retry shortly.', errorCode, requestId: 'req-4' };
+          throw e;
+        },
+      },
+    } as never;
+    const r = await documentAsk({ client, log }).handler({ documentId: 'd1', query: 'q' }, {});
+    assert.equal(r.isError, true);
+    assert.match(r.content[0].text, new RegExp(`HTTP ${statusCode} \\(${errorCode}\\)`));
+    assert.match(r.content[0].text, new RegExp(`errorCode: ${errorCode}`));
+  });
+}
+
+for (const [label, make, sdk, method, args] of [
+  ['document_update', (client: never) => documentUpdate({ client, log }), 'documents', 'patchDocument', { documentId: 'doc1', fields: { a: 1 } }],
+  ['folder_update', (client: never) => folderUpdate({ client, log }), 'folders', 'patchFolder', { id: 'fld1', description: 'd' }],
+] as const) {
+  test(`${label} returns the platform's 409 VERSION_CONFLICT with its errorCode when no expectedVersion was sent`, async () => {
+    const client = {
+      [sdk]: {
+        [method]: async () => {
+          const e = new Error('conflict') as Error & { statusCode: number; body: unknown };
+          e.statusCode = 409;
+          e.body = { message: 'The item changed while this update was applied. Re-read it and retry.', errorCode: 'VERSION_CONFLICT', requestId: 'req-5' };
+          throw e;
+        },
+      },
+    } as never;
+    const r = await make(client).handler(args as never, {});
+    assert.equal(r.isError, true);
+    assert.match(r.content[0].text, /HTTP 409 \(VERSION_CONFLICT\)/);
+    assert.match(r.content[0].text, /errorCode: VERSION_CONFLICT/);
+  });
+}
+
 // ============================================================================
 // document_ask
 // ============================================================================

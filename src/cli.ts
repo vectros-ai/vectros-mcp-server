@@ -132,9 +132,9 @@ async function main(): Promise<void> {
   // Fixed the same way: process.exitCode instead of process.exit(), letting
   // the event loop drain naturally.
   //
-  // ⚠️ OWNER-RULED DESIGN DECISION — do not "fix" this by moving the
-  // SIGINT/SIGTERM registration below to before this block. That was tried
-  // twice and reverted both times; read this before trying a third:
+  // ⚠️ DESIGN CONSTRAINT — do not "fix" this by moving the
+  // SIGINT/SIGTERM registration below to before this block. It was tried twice
+  // and reverted both times; read this before trying a third:
   //
   // The /v1/ping fetch this awaits (identity.ts) has NO timeout and NO
   // AbortController — it's an unbounded `await fetch(...)`. That rules out
@@ -154,7 +154,7 @@ async function main(): Promise<void> {
   // wiring in both entry points, new tests) — or (b) accept that a signal
   // during this brief startup window gets Node's plain default disposition
   // (immediate termination, no graceful log) instead of shutdown()'s path.
-  // (b) is the ruling: registering the listeners only AFTER a successful
+  // (b) is the chosen design: registering the listeners only AFTER a successful
   // connect(), below, means shutdown() can never run while this fetch is
   // outstanding — full stop, no exception, no abort machinery needed.
   try {

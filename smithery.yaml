@@ -1,5 +1,5 @@
 # Smithery configuration for @vectros-ai/mcp-server
-# https://smithery.ai/docs/build/project-config/smithery.yaml
+# https://smithery.ai/docs
 #
 # Local stdio server: Smithery's guided install writes a client config that runs
 # the published package via `npx`. It does NOT provision a credential — the user

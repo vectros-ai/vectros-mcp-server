@@ -19,20 +19,17 @@ import type { Logger } from '../log.js';
  * every name here needs a factory there, and vice versa. The server
  * iterates this list at construction; an unimplemented name throws.
  *
- * v0.1 (shipped 2026-05-30): hybrid_search, record_query, rag_ask, document_ask
- * v0.2 (shipped):             list_schemas, document_get, current_identity, document_ingest
+ * v0.1:                       hybrid_search, record_query, rag_ask, document_ask
+ * v0.2:                       list_schemas, document_get, current_identity, document_ingest
  * launch data-plane I/O:      record_get, record_create, record_update, record_delete (tier 1);
  *                             document_query (tier 2);
  *                             document_update, document_delete, folder_query,
  *                             folder_create, folder_update, folder_delete (tier 3)
- *                             (see the data-plane surface doc)
  * parity sweep:               lookup_principal (identity resolution for the
  *                             ownership filters), version_history (record/document
  *                             audit trail)
- * 0.41.0 SDK adoption:        record_batch_get (POST /v1/records/batch-get went
- *                             live in 0.41.0 — previously a 501 stub)
- * 0.43.0 SDK adoption:        record_batch_write (POST /v1/records/batch went
- *                             live in 0.43.0 — previously a 501 stub)
+ * 0.41.0 SDK adoption:        record_batch_get (POST /v1/records/batch-get, live since 0.41.0)
+ * 0.43.0 SDK adoption:        record_batch_write (POST /v1/records/batch, live since 0.43.0)
  */
 export const TOOL_NAMES = [
   'hybrid_search',

@@ -124,7 +124,7 @@ test('record_query accepts lookup mode', () => {
   assert.ok(r.success);
 });
 
-test('record_query no longer requires type at the SCHEMA level (mode decides)', () => {
+test('record_query does not require type at the SCHEMA level (mode decides)', () => {
   // `type` became optional in 0.17.0 because list mode can now select by `folderId` or
   // `recent` instead. The requirement did not disappear — it moved into the handler,
   // where it depends on the mode (see the handler tests: a lookup still demands `type`,
@@ -281,6 +281,30 @@ test('document_ask accepts providerAlias as a non-empty string and rejects anyth
   assert.ok(validateStrict('document_ask', { documentId: 'd1', prompt: 'q', providerAlias: 'my-vllm' }).success);
   assert.ok(!validateStrict('document_ask', { documentId: 'd1', prompt: 'q', providerAlias: '' }).success);
   assert.ok(!validateStrict('document_ask', { documentId: 'd1', prompt: 'q', providerAlias: false }).success);
+});
+
+// The three ways the provider waiver can be missing arrive as `errorCode`s on the 403. An agent reads the description
+// to learn them, so both tools must name every one.
+test('rag_ask and document_ask providerAlias descriptions name the three waiver errorCodes', () => {
+  for (const name of ['rag_ask', 'document_ask'] as const) {
+    const d = String(tools[name].inputSchema.providerAlias.description);
+    const named = [...new Set(d.match(/WAIVER_[A-Z_]+/g) ?? [])].sort();
+    assert.deepEqual(named, ['WAIVER_NOT_SIGNED', 'WAIVER_REVOKED', 'WAIVER_TEXT_CHANGED'], `${name} providerAlias description names exactly the three public codes`);
+  }
+});
+
+// Without `expectedVersion` an update that meets another change at the same moment is still refused; an agent reads
+// that in the parameter description, and `current_identity` lists every capability the credential description omits.
+test('the update tools say a concurrent change is refused even without expectedVersion', () => {
+  for (const name of ['record_update', 'document_update', 'folder_update'] as const) {
+    const d = String(tools[name].inputSchema.expectedVersion.description);
+    assert.match(d, /still refused as a conflict/, `${name} expectedVersion description`);
+    assert.ok(!/last-write-wins/i.test(d), `${name} no longer promises last-write-wins`);
+  }
+});
+
+test('current_identity names trigger-control-plane-grant among the capabilities it does not report', () => {
+  assert.match(String(tools.current_identity.description), /trigger-control-plane-grant/);
 });
 
 // What an agent reads about the generation limits has to match what the platform does with the default model: the
@@ -652,7 +676,7 @@ test('record_batch_write description warns that a fully-failed batch is not an e
 });
 
 test('record_batch_write description names the two 0.43.0-new per-item statuses', () => {
-  // `forbidden` and `not_committed` were previously inexpressible, and they call for
+  // `forbidden` and `not_committed` call for
   // DIFFERENT remedies (fix the credential vs resubmit the batch) — an agent that
   // does not know them treats both as a payload problem.
   assert.match(tools.record_batch_write.description, /forbidden/);
@@ -662,7 +686,7 @@ test('record_batch_write description names the two 0.43.0-new per-item statuses'
 test('folder_delete description states the emptiness precondition, including records', () => {
   // API 0.43.0 widened the refusal: records now block a folder delete alongside
   // documents and sub-folders. Being non-empty is the most common way this call
-  // fails, and the description previously named only protected folders.
+  // fails, so the description must name it, not only protected folders.
   const d = tools.folder_delete.description;
   assert.match(d, /empty/i);
   assert.match(d, /records/i, 'records must be named — 0.43.0 made them block the delete');
@@ -751,8 +775,8 @@ test('scopeFilters rejects an empty array on both tools (the API 400s on it)', (
 });
 
 test('hybrid_search states the ARCHIVED exclusion for RECORDS as well as documents', () => {
-  // Records have refused to index while archived since API 0.35; the description said
-  // "documents" only, which read as an asymmetry implying archived records still match.
+  // Records refuse to index while archived (since API 0.35); a description naming
+  // "documents" only would read as an asymmetry implying archived records still match.
   const d = tools.hybrid_search.description;
   assert.match(d, /ARCHIVED/);
   assert.match(d, /records/i, 'records must be named, not just documents');
@@ -768,14 +792,14 @@ test('hybrid_search warns that a pre-enforcement archived item can still be retu
 });
 
 test('the date-window params are described as CREATION time — the platform contract', () => {
-  // Two different fields, and an earlier revision of this branch conflated them:
+  // Two different fields, not to be conflated:
   //   • a hit's RETURNED createdAt is the search-index timestamp (later for a re-indexed item);
   //   • the createdAfter/createdBefore FILTERS are documented "created at or after" and the
   //     platform deliberately preserves that — the time-window filter uses the row's true, unchanging
   //     createdAt for anything past its first index, and only borrows the index time AT first
   //     index as a bounded clock-skew allowance.
-  // Describing the filters as index-time was backwards for exactly the re-index case it named,
-  // and this test previously asserted /index/i, holding the error in place. Assert the contract.
+  // Describing the filters as index-time would be backwards for exactly the re-index case.
+  // Assert the contract.
   const hs = tools.hybrid_search.inputSchema as Record<string, z.ZodTypeAny>;
   for (const f of ['createdAfter', 'createdBefore']) {
     const d = hs[f]!.description ?? '';

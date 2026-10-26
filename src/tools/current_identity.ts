@@ -50,10 +50,10 @@ const currentIdentity: ToolFactory = ({ log, apiKey, environment }) => ({
     "(staging|production), principalType (root_key|scoped_key|token), principalKeyId, principalLabel, " +
     "and (for scoped credentials) allowedActions plus dataScope — the credential's verb+ownership reach " +
     "as { userId, scopes[] }, where each scope is a `namespace:value` string (e.g. \"org:<uuid>\"). Note: " +
-    "this does not yet include granted_capabilities (member-lifecycle / forensic-read / " +
+    "this does not include granted_capabilities (member-lifecycle / forensic-read / " +
     "context-directory-read / delegate-mint, as of API 0.40.0, joined by delegate-principal-stamp " +
-    "in 0.42.0) — a separate reach dimension a scope clause can carry that " +
-    "/v1/ping does not report yet, so allowedActions+dataScope may understate a " +
+    "in 0.42.0 and trigger-control-plane-grant in 0.44.0) — a separate reach dimension a scope clause can carry that " +
+    "/v1/ping does not report, so allowedActions+dataScope may understate a " +
     "credential's true reach. Also reports mcpServerVersion (this server's own package version) and " +
     "sdkVersion (the bundled @vectros-ai/sdk version) so a caller can tell what build it's talking to. " +
     "Use this when the user asks 'what can you do here?', 'what tenant am I in?', or 'what version is " +

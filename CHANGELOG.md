@@ -3,6 +3,24 @@
 All notable changes to `@vectros-ai/mcp-server` are documented here.
 This project adheres to [Semantic Versioning](https://semver.org).
 
+## 0.18.2 — 2026-10-25
+
+### Changed
+
+- **The `providerAlias` description of `rag_ask` and `document_ask` names the three waiver refusals.** When a call routed
+  through your own provider is refused because the account's provider waiver is not in force, the `403` carries an
+  `errorCode`: `WAIVER_NOT_SIGNED`, `WAIVER_TEXT_CHANGED` or `WAIVER_REVOKED`. The two descriptions and the README say what
+  each means and that an account owner resolves each in the developer portal.
+- **The `expectedVersion` descriptions of `record_update`, `document_update` and `folder_update` say what happens without it.**
+  An update that meets another change to the same item at the same moment is refused as a conflict (`409`,
+  `VERSION_CONFLICT`) whether or not `expectedVersion` is sent.
+- **The README lists the refusals added in API 0.48.0 and what the tools return for them:** `429` `BALANCE_BUSY`, `503`
+  `BALANCE_UNAVAILABLE`, and a `503` with no `errorCode` for a `providerAlias` whose stored provider key cannot be opened. It
+  also describes the `409` of a concurrent update and the items of a deleted schema.
+- **The `current_identity` tool and the `vectros://identity` resource list `trigger-control-plane-grant` among the capabilities
+  that the credential description omits.**
+- **The comments in the shipped code describe the code as it is today.** Behaviour is unchanged.
+
 ## 0.18.1 — 2026-10-12
 
 ### Changed
@@ -264,7 +282,7 @@ This project adheres to [Semantic Versioning](https://semver.org).
 - **`folder_delete` no longer implies a record cannot be moved.** It said a record must be deleted
   because it cannot be re-filed. The API supports re-filing one (`folderId` is patchable); it is
   *this server* that does not expose it — `record_update` has no `folderId` argument. As written, an
-  agent clearing a folder could have deleted partner data where a move was available, then reported
+  agent clearing a folder could have deleted a record where a move was available, then reported
   that a move was impossible. It now names the gap as this server's and says to move the record
   through the API/SDK rather than deleting it here.
 - **`record_batch_write` no longer claims duplicate `externalId`s within one batch are refused.**

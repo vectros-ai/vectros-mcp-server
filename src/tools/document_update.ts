@@ -13,7 +13,7 @@
  *
  * Optimistic concurrency: pass the `version` you last read as `expectedVersion`.
  * If the document changed since, the server rejects with a 409 conflict (re-read
- * via document_get and retry). Omit `expectedVersion` for last-write-wins.
+ * via document_get and retry). Without `expectedVersion` an update still fails with a 409 when it meets another change to the same item at the same moment.
  *
  * Requires the credential to allow `documents:u`.
  */
@@ -79,7 +79,7 @@ const inputSchema = {
     .optional()
     .describe(
       'Optimistic concurrency: the version you last read. If the document changed since, the update is ' +
-        'refused as a conflict (re-read and retry). Omit for last-write-wins.',
+        'refused as a conflict (re-read and retry). Omit it to update whatever version is current: an update that meets another change to the same document at the same moment is still refused as a conflict.',
     ),
 };
 
