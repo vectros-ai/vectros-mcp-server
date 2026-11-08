@@ -19,8 +19,8 @@
  *   HTTP transport:
  *     - `text`     → ingestDocument() (same as stdio)
  *     - `filePath` → REJECTED at validation time. Remote MCP servers
- *                    can't read the partner's filesystem. Partner
- *                    must use text mode or call SDK directly.
+ *                    can't read the caller's filesystem. Use text
+ *                    mode or call the SDK directly.
  *
  * The rejection on HTTP+filePath is intentional and load-bearing —
  * silently failing-or-succeeding-weirdly would be worse than a
@@ -31,6 +31,7 @@ import { readFile, realpath } from 'node:fs/promises';
 import { basename, extname, resolve, relative, isAbsolute } from 'node:path';
 import type { ToolFactory, ToolResult } from './types.js';
 import { toolError } from './errors.js';
+import { MAX_OWNERSHIP_SCOPES } from './limits.js';
 
 /** Thrown when a filePath escapes the ingest jail. */
 class IngestPathError extends Error {
@@ -121,7 +122,7 @@ async function resolveJailedPath(filePath: string, ingestRoot: string): Promise<
   return canonical;
 }
 
-// Minimal MIME-type lookup for common file types. Partners can
+// Minimal MIME-type lookup for common file types. Callers can
 // explicitly pass fileType to override.
 const EXT_TO_MIME: Record<string, string> = {
   '.pdf': 'application/pdf',
@@ -253,6 +254,7 @@ const inputSchema = {
   userId: z.string().optional().describe('Owning user ID. Optional.'),
   scopes: z
     .array(z.string())
+    .max(MAX_OWNERSHIP_SCOPES, `scopes accepts at most ${MAX_OWNERSHIP_SCOPES} entries`)
     .optional()
     .describe(
       'TEXT MODE ONLY. Scope ownership as `namespace:value` entries, at most 2 (e.g. ["org:<uuid>", ' +
@@ -274,7 +276,8 @@ const documentIngest: ToolFactory = ({ client, log, transport, ingestRoot }) => 
     '  • File mode: pass `filePath` (local path on the MCP server\'s host machine). STDIO-TRANSPORT ONLY — ' +
     'rejected on HTTP transport. MCP server reads the bytes, requests a presigned upload URL, and PUTs them. ' +
     'Returns when the upload is accepted (indexStatus: PENDING_INDEX); poll `document_get` until indexStatus ' +
-    'is INDEXED. EXCEPTION — re-ingesting file mode against an externalId that already has a document ' +
+    'is terminal: INDEXED, SKIPPED (no indexable text: `extraction.outcome` says why, e.g. NO_TEXT for an ' +
+    'image or a scanned page), STORED (indexMode NONE) or FAILED. EXCEPTION — re-ingesting file mode against an externalId that already has a document ' +
     '(response `created:false`): the file body is replaced by ANY such re-ingest, whether or not `upsert` was ' +
     'set (`upsert` there only additionally applies `payload`/`title` to the matched document). The document ' +
     'keeps serving the OLD file\'s bytes until the new one is adopted, and indexStatus already reads INDEXED ' +
@@ -496,7 +499,7 @@ const documentIngest: ToolFactory = ({ client, log, transport, ingestRoot }) => 
       );
 
       // Return the upload response — caller can poll document_get(id)
-      // until indexStatus is INDEXED. We don't poll here; that's the agent's
+      // until indexStatus is terminal. We don't poll here; that's the agent's
       // job. The server stamped indexStatus before our PUT completed, so
       // override it with the post-upload processing state (the lifecycle
       // `status` passes through untouched — it's a separate axis).
@@ -517,7 +520,8 @@ const documentIngest: ToolFactory = ({ client, log, transport, ingestRoot }) => 
             'value it held before this call, the new file has been adopted. Any download URL already held for ' +
             'this document was minted for the old file and can stop working before its stated downloadExpires ' +
             'once adoption happens — request a fresh one after fileItemId changes.'
-          : 'File uploaded; indexing is asynchronous. Poll document_get(id) until indexStatus is INDEXED.';
+          : 'File uploaded; indexing is asynchronous. Poll document_get(id) until indexStatus is INDEXED, ' +
+            'SKIPPED (no indexable text; see extraction.outcome), STORED or FAILED.';
 
       return {
         content: [

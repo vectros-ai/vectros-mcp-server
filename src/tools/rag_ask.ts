@@ -16,6 +16,7 @@ import type { Vectros } from '@vectros-ai/sdk';
 import type { ToolFactory, ToolResult } from './types.js';
 import { consumeStream, type SseEvent } from '../sse.js';
 import { toolError } from './errors.js';
+import { MAX_CONTENT_TYPES, MAX_SCOPE_FILTERS } from './limits.js';
 import { providerAliasInput } from './provider-alias.js';
 
 const SEARCH_MCP_DEFAULT_LIMIT = 5;
@@ -74,6 +75,7 @@ const inputSchema = {
       scopeFilters: z
         .array(z.string())
         .min(1, 'scopeFilters must name at least one dimension when supplied')
+        .max(MAX_SCOPE_FILTERS, `scopeFilters accepts at most ${MAX_SCOPE_FILTERS} entries`)
         .optional()
         .describe(
           'Restrict retrieval to content matching ALL of these scope values — one per namespace — for a ' +
@@ -87,10 +89,11 @@ const inputSchema = {
       typeName: z.string().optional().describe('Restrict record retrieval to this schema type.'),
       contentTypes: z
         .array(z.enum(['documents', 'records']))
+        .max(MAX_CONTENT_TYPES, `contentTypes accepts at most ${MAX_CONTENT_TYPES} entries`)
         .optional()
         .describe('Narrow retrieval to content types. ["documents"] or ["records"]; omit for both.'),
       filters: z
-        .record(z.unknown())
+        .record(z.string(), z.unknown())
         .optional()
         .describe(
           'Field-level metadata filters (AND-combined). Value = scalar (equality), array (OR-set), or operator ' +

@@ -90,7 +90,8 @@ const documentGet: ToolFactory = ({ client, log }) => ({
     '`externalId` + `type` (resolved for you). Pass `includeText: true` to also fetch the text body ' +
     '(capped at ~8K tokens; `truncated: true` flag if cut). Text is available for every text-ingested ' +
     'document and for file-ingested documents unless they were uploaded with `storeText: false` (extracted ' +
-    'text discarded after indexing) — then `textAvailable: false` is set; the original file is still ' +
+    'text discarded after indexing) or no text could be extracted from the file (`extraction.outcome` other ' +
+    'than OK/TRUNCATED, e.g. an image or a scanned page) — then `textAvailable: false` is set; the original file is still ' +
     'retrievable via `includeDownloadUrl`. Pass `includeDownloadUrl: true` to also ' +
     'get a short-lived presigned `downloadUrl` for the original file (file-backed documents only). ' +
     'Returns the full document metadata, including its lifecycle `status` (ACTIVE, or ARCHIVED when ' +
@@ -117,7 +118,7 @@ const documentGet: ToolFactory = ({ client, log }) => ({
       let extra: Record<string, unknown> = {};
 
       if (includeText) {
-        // Second call — swallow 404 gracefully (text not retained).
+        // Second call — swallow 404 gracefully (text not retained, or none could be extracted).
         try {
           const textResponse = await client.documents.getDocumentText({ id });
           const rawText = textResponse?.text ?? '';
@@ -127,7 +128,7 @@ const documentGet: ToolFactory = ({ client, log }) => ({
           if (isNotAvailable(textErr)) {
             log.debug(
               { tool: 'document_get', id },
-              'document_get text unavailable (not retained — storeText:false upload)',
+              'document_get text unavailable (not retained, or no text could be extracted from the file)',
             );
             extra = { ...extra, textAvailable: false };
           } else {

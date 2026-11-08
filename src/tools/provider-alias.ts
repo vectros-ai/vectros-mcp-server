@@ -16,8 +16,8 @@ export const providerAliasInput = z
       'provider config your account has activated. It works only after your account has set up that provider and ' +
       'signed the platform\'s risk-acceptance waiver; without both, the platform refuses the call with a 403, which ' +
       'is returned to you as written. When the waiver is the cause, the 403 carries an `errorCode` that says which case it is: ' +
-      '`WAIVER_NOT_SIGNED` (the waiver has not been signed), `WAIVER_TEXT_CHANGED` (it was signed, but its text changed ' +
-      'afterwards, so the earlier signature no longer counts), or `WAIVER_REVOKED` (an owner revoked it). ' +
+      '`WAIVER_NOT_SIGNED` (the waiver has not been signed), `WAIVER_TEXT_CHANGED` (Vectros now requires a newer version of the ' +
+      'waiver than the one in force for your account), or `WAIVER_REVOKED` (an owner revoked it). ' +
       'An account owner resolves each in the developer portal (Model Providers); retrying the call does not help. If your account has accepted the Business Associate Agreement with Vectros in the developer portal, an account ' +
       'owner must also have attested that provider config in the developer portal (Model Providers); until then the ' +
       'platform refuses the call with a 403 that says it needs a BAA-holder attestation. A call served by your own provider leaves the Vectros perimeter. ' +

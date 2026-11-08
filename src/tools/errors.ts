@@ -42,7 +42,7 @@ function asErrorBody(body: unknown): VectrosErrorBody | undefined {
  *
  * @param toolName  for log + result framing
  * @param err       the thrown value (Error or unknown)
- * @param docPointer  optional URL to surface for partner-actionable errors
+ * @param docPointer  optional URL to surface for errors the caller can act on
  */
 export function toolError(toolName: string, err: unknown, docPointer?: string): ToolResult {
   let summary = `${toolName} failed`;

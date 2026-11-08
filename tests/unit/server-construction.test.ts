@@ -65,6 +65,10 @@ test('construction with default tools registers every shipped tool', () => {
       'record_batch_get',
       // 0.43.0 SDK adoption
       'record_batch_write',
+      // 0.49.0 SDK adoption
+      'agent_list',
+      'agent_run',
+      'run_get',
     ].sort(),
   );
 });

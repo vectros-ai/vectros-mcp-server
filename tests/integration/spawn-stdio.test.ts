@@ -81,6 +81,10 @@ test('spawn stdio server + handshake + list_tools', async () => {
         // 0.41.0 SDK adoption
         'record_batch_get',
         'record_batch_write',
+        // 0.49.0 SDK adoption
+        'agent_list',
+        'agent_run',
+        'run_get',
       ].sort(),
     );
 
@@ -143,6 +147,8 @@ test('spawn stdio server + handshake + list_tools', async () => {
       'current_identity',
       'lookup_principal',
       'version_history',
+      'agent_list',
+      'run_get',
     ];
     for (const name of READ_TOOLS) {
       const t = byName.get(name);
@@ -164,6 +170,7 @@ test('spawn stdio server + handshake + list_tools', async () => {
       'folder_update',
       'rag_ask',
       'document_ask',
+      'agent_run',
     ];
     for (const name of WRITE_TOOLS) {
       const t = byName.get(name);

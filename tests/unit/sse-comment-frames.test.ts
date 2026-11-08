@@ -28,7 +28,7 @@ const DONE = {
   outputTokens: 7,
   model: 'm',
   platformCreditsCharged: 0,
-  inferenceBalanceCentsCharged: 0,
+  inferenceBalanceCentsChargedMilli: 0,
 };
 
 const RESULTS_FRAME = frame('search_results', { results: [], totalResults: 0, searchTimeMs: 3 });

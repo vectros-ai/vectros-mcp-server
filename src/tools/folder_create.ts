@@ -19,6 +19,7 @@
 import { z } from 'zod';
 import type { ToolFactory, ToolResult } from './types.js';
 import { toolError } from './errors.js';
+import { MAX_OWNERSHIP_SCOPES } from './limits.js';
 
 const inputSchema = {
   name: z.string().min(1, 'name is required').describe('Folder display name.'),
@@ -38,6 +39,7 @@ const inputSchema = {
   userId: z.string().optional().describe('Owning user (Vectros UUID).'),
   scopes: z
     .array(z.string())
+    .max(MAX_OWNERSHIP_SCOPES, `scopes accepts at most ${MAX_OWNERSHIP_SCOPES} entries`)
     .optional()
     .describe(
       'Scope ownership as `namespace:value` entries, at most 2 (e.g. ["org:<uuid>", "group:eng-team"]). ' +

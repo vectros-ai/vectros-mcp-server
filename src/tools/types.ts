@@ -30,6 +30,8 @@ import type { Logger } from '../log.js';
  *                             audit trail)
  * 0.41.0 SDK adoption:        record_batch_get (POST /v1/records/batch-get, live since 0.41.0)
  * 0.43.0 SDK adoption:        record_batch_write (POST /v1/records/batch, live since 0.43.0)
+ * 0.49.0 SDK adoption:        agent_list, agent_run, run_get (stored agents: GET /v1/agents,
+ *                             POST /v1/runs, GET /v1/runs/{id})
  */
 export const TOOL_NAMES = [
   'hybrid_search',
@@ -55,6 +57,9 @@ export const TOOL_NAMES = [
   'document_ingest',
   'lookup_principal',
   'version_history',
+  'agent_list',
+  'agent_run',
+  'run_get',
 ] as const;
 export type ToolName = (typeof TOOL_NAMES)[number];
 
@@ -129,7 +134,7 @@ export interface ToolFactoryContext {
    * `cli-http.ts` for HTTP) pass the appropriate value.
    *
    * Only `document_ingest` uses this — to reject `filePath` mode on
-   * HTTP transport (remote MCP server can't touch the partner's
+   * HTTP transport (remote MCP server can't touch the caller's
    * local filesystem).
    * Undefined treated as 'stdio' (the v0.1 default).
    */

@@ -30,6 +30,9 @@ import currentIdentity from './current_identity.js';
 import documentIngest from './document_ingest.js';
 import lookupPrincipal from './lookup_principal.js';
 import versionHistory from './version_history.js';
+import agentList from './agent_list.js';
+import agentRun from './agent_run.js';
+import runGet from './run_get.js';
 
 export const ALL_TOOL_FACTORIES: Record<string, ToolFactory> = {
   hybrid_search: hybridSearch,
@@ -55,6 +58,9 @@ export const ALL_TOOL_FACTORIES: Record<string, ToolFactory> = {
   document_ingest: documentIngest,
   lookup_principal: lookupPrincipal,
   version_history: versionHistory,
+  agent_list: agentList,
+  agent_run: agentRun,
+  run_get: runGet,
 };
 
 export { TOOL_NAMES, type ToolName, type ToolDefinition, type ToolFactory } from './types.js';

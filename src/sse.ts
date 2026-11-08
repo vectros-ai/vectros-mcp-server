@@ -16,7 +16,7 @@
  * carries flat token/billing fields (NOT a nested `usage` object). Reading
  * the pre-0.23 names silently aggregates an EMPTY answer — the SDK stream is
  * consumed via an `as` cast so tsc can't catch the drift; only a live smoke
- * does. See tests/03-rag-ask + tests/11 against staging.
+ * does.
  *
  * This helper:
  *   1. Iterates the stream.

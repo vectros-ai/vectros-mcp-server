@@ -41,7 +41,7 @@ const folderDelete: ToolFactory = ({ client, log }) => ({
     'this call fails. Use record_query with this folderId, and document_query, to see what is in it. ' +
     'Clearing it differs by content type: a document can be moved out (document_update with a different ' +
     'folderId) or deleted. A RECORD can also be re-filed into another folder — the API supports it — but ' +
-    'THIS SERVER does not expose that yet: record_update has no folderId argument, so from here your only ' +
+    'THIS SERVER does not expose that: record_update has no folderId argument, so from here your only ' +
     'option is record_delete (needs records:d). Do NOT read that as "the record cannot be moved" and ' +
     'delete the record on that basis: if the record should be kept, tell the user to move it with the ' +
     'Vectros API/SDK directly rather than deleting it here. A sub-folder cannot be re-parented at all, so nested folders ' +

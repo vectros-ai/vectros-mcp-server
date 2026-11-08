@@ -22,6 +22,7 @@ import { z } from 'zod';
 import type { Vectros } from '@vectros-ai/sdk';
 import type { ToolFactory, ToolResult } from './types.js';
 import { toolError } from './errors.js';
+import { MAX_OWNERSHIP_SCOPES } from './limits.js';
 
 const inputSchema = {
   id: z.string().min(1, 'id is required').describe('The Vectros folder id to update.'),
@@ -30,6 +31,7 @@ const inputSchema = {
   userId: z.string().optional().describe('Reassign the owning user (Vectros UUID).'),
   scopes: z
     .array(z.string())
+    .max(MAX_OWNERSHIP_SCOPES, `scopes accepts at most ${MAX_OWNERSHIP_SCOPES} entries`)
     .optional()
     .describe(
       'Reassign scope ownership as `namespace:value` entries, at most 2 (e.g. ["org:<uuid>", ' +

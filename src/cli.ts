@@ -53,7 +53,7 @@ async function main(): Promise<void> {
   // Runtime-only. Provisioning (the `bootstrap` subcommand) moved to the
   // separate @vectros-ai/cli package (`npx -y @vectros-ai/cli bootstrap`) —
   // the credential-minting path is deliberately NOT shipped inside the
-  // runtime a partner runs with their key.
+  // runtime that holds the key.
   const log = createLogger();
 
   // Resolve the key from env, else the CLI keyring helper (one credential

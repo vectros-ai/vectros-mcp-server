@@ -26,8 +26,12 @@ npx -y @vectros-ai/mcp-server
 ```
 
 Your agent can search your indexed corpus, query structured records,
-ingest documents, and ask questions grounded against documents — reaching
-only your tenant's data, never the public web (there are no web tools).
+ingest documents, ask questions grounded against documents, and run the
+agents you have stored. The server itself makes no call to the web; a stored
+agent you run can search the web (`web_search`) or fetch a page (`web_fetch`)
+when its definition lists that tool. Web fetch also needs your tenant's owner
+to switch it on, and a run of an agent that lists `web_search` is refused while
+the platform has web search disabled.
 
 ## Quick start — one command
 
@@ -112,11 +116,14 @@ Precision is the pitch — what this server deliberately does *not* do:
 - **There's a human step.** Bootstrap needs a developer-portal sign-in / bridge
   token. One command, but a person signs in — there is no fully unattended
   provisioning.
-- **No web tools, on purpose.** The agent surface has no web-search or web-fetch
-  tools at all. Vectros is the memory, not the browser.
-- **Agent document upload is text-inline today.** An agent ingests document text
+- **Web search comes through your agents.** The server itself makes no call to the web:
+  Vectros is the memory, not the browser. `agent_run` on a stored agent whose definition
+  lists `web_search` or `web_fetch` can search the web or fetch a page; web fetch also
+  needs your tenant's owner to switch it on, and web search needs the platform to have
+  it enabled (otherwise the run is refused).
+- **Agent document upload is text-inline.** An agent ingests document text
   inline; on the stdio transport a jailed local-file upload is supported, but
-  bulk file upload from the agent surface isn't the path today.
+  bulk file upload from the agent surface isn't the path.
 - **Audit history is tamper-*evident*, not tamper-proof.** A state-continuity
   chain makes out-of-band alteration *detectable*; it is not continuous
   automated verification.
@@ -225,7 +232,7 @@ resolves to its main repo's `.mcp.json` — add and open from the same project.
 > pin an explicit version (`npx -y @vectros-ai/mcp-server@<version>`) known to
 > work.
 
-## Tools (23 tools)
+## Tools (26 tools)
 
 **Search & RAG**
 
@@ -253,7 +260,7 @@ resolves to its main repo's `.mcp.json` — add and open from the same project.
 | Tool | What it does |
 |---|---|
 | `document_ingest` | Create a document — inline text body OR local file upload (file mode is stdio-transport only). Idempotent by `externalId`; optional `schemaId` + `payload` for a typed, lookup-queryable document. An `externalId` with no `schemaId` is refused by platform 0.46.0 and later unless you also pass `confirmUntyped: true`. |
-| `document_query` | Query documents by lookup field (equality / range / prefix, with `asc`/`desc` ordering) or list mode (filter by folder and ownership). |
+| `document_query` | Query documents by lookup field (equality / range / prefix, with `asc`/`desc` ordering) or list mode (filter by `type`, folder and ownership). The `type` list filter applies page by page: a page can be short or empty while `nextCursor` is set, so keep paging before concluding there are none, or use `hybrid_search` with `typeName` for a large collection. Lookup arguments without `field`, and an empty `type`, are refused. |
 | `document_get` | Fetch a document by id (metadata incl. lifecycle `status` + processing `indexStatus`; optional text truncated at ~8K tokens; optional presigned `downloadUrl` for file-backed documents — always forces a download, never inline rendering, regardless of file type). |
 | `document_update` | Patch a document's metadata / typed payload (deep-merged); archive/restore via `status` (`ARCHIVED` soft-retracts from search, `ACTIVE` restores); optimistic concurrency via `expectedVersion`. |
 | `document_delete` | Permanently delete a document by id (removes it and its indexed content). |
@@ -271,13 +278,65 @@ resolves to its main repo's `.mcp.json` — add and open from the same project.
 
 | Tool | What it does |
 |---|---|
-| `current_identity` | Describe the credential: tenantId, environment, principalType, principalKeyId, principalLabel, and (for scoped credentials) allowedActions + dataScope. Does **not** yet include `granted_capabilities` (`member-lifecycle` / `forensic-read` / `context-directory-read` / `delegate-mint`, as of API 0.40.0, joined by `delegate-principal-stamp` in 0.42.0 and `trigger-control-plane-grant` in 0.44.0) — a separate reach dimension a scope clause can carry that `/v1/ping` doesn't report yet, so allowedActions + dataScope may understate a credential's true reach. Also reports this server's own version and the bundled SDK version (`mcpServerVersion`, `sdkVersion`). |
+| `current_identity` | Describe the credential: tenantId, environment, principalType, principalKeyId, principalLabel, and (for scoped credentials) allowedActions + dataScope. Does **not** include `granted_capabilities` (`member-lifecycle` / `forensic-read` / `context-directory-read` / `delegate-mint`, as of API 0.40.0, joined by `delegate-principal-stamp` in 0.42.0 and `trigger-control-plane-grant` in 0.44.0) — a separate reach dimension a scope clause can carry that `/v1/ping` doesn't report, so allowedActions + dataScope may understate a credential's true reach. Also reports this server's own version and the bundled SDK version (`mcpServerVersion`, `sdkVersion`). |
 | `lookup_principal` | Resolve a user, or an identity entity in a namespace (`org`/`client`/any namespace you registered), by your own `externalId` (→ its Vectros UUID, for the ownership filters) or by a schema lookup field. Pass `contextId` to target a specific app context for a context-owned namespace. Read-only. |
 | `version_history` | Read the audit/version trail (CREATE/UPDATE/DELETE, with actor + diff) for one record or document. Read-only. |
 
-All 23 tools wrap published Vectros HTTP API endpoints. JSON
+**Agents** (run the stored agents of your app context; defining or changing an agent is done through the API)
+
+| Tool | What it does |
+|---|---|
+| `agent_list` | List the stored agents (running one needs `runs:c`), as each one's `id`, `name`, `description`, `latestVersion` and `status` (paginated via `nextCursor`; retired and purged agents only with `includeRetired`), in your credential's own app context, the one `agent_run` runs in. Needs `runs:c` or `agents:r`. Read-only. |
+| `agent_run` | Run a stored agent on one `input` and return its answer: `{ runId, agentId, agentVersion, status, terminal, reason, errorCode, text, toolCalls, charged }`; `charged` carries the run's charge and refund in milli-cents (1 cent = 1000). `maxInferenceCents` caps the run's model cost (it can only lower the agent's own budget) and `readOnly` refuses every tool call that would change data. The run's tool calls act as you, with your permissions, and only through the tools the agent lists. Progress notifications keep the call alive while the run works (for a client that resets its timeout on progress); cancelling the call cancels the run once it is named. The server itself makes no call to the web; a stored agent can search the web or fetch a page when its definition lists that web tool (web fetch also needs your tenant's owner to switch it on, and web search needs the platform to have it enabled: otherwise the run is refused). Billed, and flagged destructive so your MCP client asks before it runs. Needs `runs:c`. |
+| `run_get` | Read one run by id: `status`, `terminal`, `reason`, `errorCode`, its tool calls (never their arguments or results) and `usage`. Use it when `agent_run` returns `terminal: false`. Needs `runs:r`, which `runs:c` does not include. Read-only. |
+
+**Running agents.** The three agent tools are registered by default, like every other tool, so **after upgrading,
+an existing install (including `npx -y @vectros-ai/mcp-server`) offers them with no config change**, and one of
+them, `agent_run`, **spends money and can change data**: it starts a billed run whose tool calls act with your
+permissions. It is marked destructive, so an MCP client that honours tool annotations asks you before it runs; to
+leave it out, use `VECTROS_MCP_TOOLS` below. A run is billed: its
+model calls against your inference balance (a prepaid account reserves the budget when the run starts and returns
+what was not used), and a fee per run, tool calls and run time against your plan. Three things on the platform side
+decide whether a call can start a run at all:
+
+1. **The credential needs the `runs:c` scope.** Without it `agent_run` returns `403`. Reading a run with `run_get`
+   needs `runs:r` as well, which `runs:c` does not include: a credential with only `runs:c` learns how its runs end
+   only from `agent_run`'s own result. `agent_list` works with `runs:c` or `agents:r`; a credential with only
+   `agents:r` can list agents but not run them.
+2. **Agent runs must be switched on for your tenant by an account owner.** Otherwise `agent_run` returns `403` with
+   `errorCode: AGENT_RUNS_NOT_ENABLED`.
+3. **The platform's run limits apply.** It limits how many runs one credential has in progress at once and how much
+   budget they hold together; a call over either returns `429`. One MCP server runs on one credential, so all of its
+   clients' concurrent `agent_run` calls share those limits.
+
+To leave `agent_run` out of a server, set `VECTROS_MCP_TOOLS` to the tools you **do** want: it is an allow-list (the
+server registers only the tools it names), not an exclusion list. For example, a server that can find and read
+agents and runs but never start one:
+
+```bash
+VECTROS_MCP_TOOLS=hybrid_search,rag_ask,record_query,record_get,document_query,document_get,agent_list,run_get
+```
+
+**Retries.** Every `agent_run` call sends an `Idempotency-Key`, so the SDK's own retries of a refused start never
+begin a second run. Calling `agent_run` again without a key starts a new, billed run: to make your retry of a whole
+call safe, pass the same `idempotencyKey` with the same arguments, and the call names the run that key already
+started instead of starting another (its answer text is not returned again, and `run_get` cannot read it back; the
+same key with different arguments is refused with `422`). A start that fails without a clear refusal (a dropped
+connection, a timeout, a `408` or a `5xx`) may still have started a run, so its error names the `idempotencyKey` to retry with.
+
+**Cancelling and long runs.** Cancelling the call cancels the run once the run is named (the response names it
+almost at once; a cancel that arrives earlier waits for the name). If the start itself then fails, nothing could be
+cancelled: retry with the key the error names to find the run. Progress notifications are sent only when the MCP
+client supplies a `progressToken` with the call, and they keep a long call alive only for a client that resets its
+request timeout on progress; a client with a fixed timeout ends the call (and so the run) when it expires. A result with `terminal: false` arrived before the run ended: read the run with `run_get` until
+`terminal` is true. `run_get` returns the run as the API reports it and never returns the answer text.
+
+All 26 tools wrap published Vectros HTTP API endpoints. JSON
 responses are what the agent sees as tool output. Per-call cost
-surfaces via the `usage` field on inference responses.
+surfaces in the `usage` field of `rag_ask` and `document_ask` results: the token counts,
+`platformCreditsCharged`, and the model cost as `inferenceBalanceCentsChargedMilli`, in
+milli-cents (1 cent = 1000). `agent_run` reports a run's charge the same way, in its
+`charged` field.
 
 **Concurrent updates.** `record_update`, `document_update`, `folder_update` and `document_ingest` with `upsert: true`
 return `409` (`errorCode: VERSION_CONFLICT`) when another request changed the same item at the same moment, whether or not
@@ -303,8 +362,8 @@ never fills it in.
 It works only after your account has set up the provider and signed the platform's risk-acceptance waiver. Without
 both, the platform refuses the call with a `403`, which the tool returns to you as written. When the waiver is the
 cause, the `403` carries an `errorCode` that says which case it is: `WAIVER_NOT_SIGNED` (the waiver has not been
-signed), `WAIVER_TEXT_CHANGED` (it was signed, but its text changed afterwards, so the earlier signature no longer
-counts) or `WAIVER_REVOKED` (an account owner revoked it). An account owner resolves each in the developer portal
+signed), `WAIVER_TEXT_CHANGED` (Vectros now requires a newer version of the waiver than the one in force for your
+account) or `WAIVER_REVOKED` (an account owner revoked it). An account owner resolves each in the developer portal
 (**Model Providers**); retrying the call does not help.
 
 If your account has accepted the Business Associate Agreement with Vectros in the developer portal, an account owner must also attest each provider
@@ -406,7 +465,7 @@ running as — `vectros keyring doctor` (CLI 0.10.0+) shows the same view.
 | `VECTROS_API_BASE_URL` | no | `https://api.vectros.ai` | Override for another environment. Validated: must be `https://` (or `http://` to localhost) and an official `*.vectros.ai` host. |
 | `VECTROS_ALLOW_INSECURE_BASE_URL` | no | — | Set `1` to bypass the base-URL allow-list (e.g. a trusted local proxy). **Not recommended** — sends your key to an unvalidated host; logs a warning. |
 | `VECTROS_MCP_INGEST_ROOT` | no | process cwd | Directory `document_ingest`'s `filePath` mode is jailed to. Paths escaping it (traversal/absolute/symlink) or matching a sensitive pattern are rejected. |
-| `VECTROS_MCP_TOOLS` | no | (all tools) | Comma-separated tool names (e.g. `hybrid_search,rag_ask`). |
+| `VECTROS_MCP_TOOLS` | no | (all tools) | Allow-list of tool names, comma-separated (e.g. `hybrid_search,rag_ask`): only these are registered. |
 | `VECTROS_MCP_DEBUG` | no | — | Set `1` for verbose stderr logs. |
 | `VECTROS_MCP_SKIP_PING_VALIDATION` | no | — | Set `1` to disable the startup `/v1/ping` check. |
 | `VECTROS_MCP_HTTP_PORT` | HTTP only | `8765` | Port for HTTP transport. |
@@ -448,10 +507,9 @@ port can call Vectros with your credentials.
 Health probe lives at `GET /healthz` (always unauthenticated, k8s
 readiness-friendly).
 
-Current limitation: the server uses one upstream credential per process
-(the key resolved at startup). Per-request credential override via the
-incoming Authorization header is a planned enhancement. For now, deploy one
-server per credential boundary you want.
+The server uses one upstream credential per process (the key resolved at
+startup); the incoming Authorization header is not used to choose another.
+Deploy one server per credential boundary you want.
 
 ## Programmatic use (advanced)
 
@@ -513,23 +571,21 @@ design-time layer that defines the data model.
 If one of these belongs on your agent's surface, that's worth telling us — the
 line is drawn on purpose and can be redrawn with a reason.
 
-## What this server doesn't do (yet)
+## What this server doesn't do
 
-- **No prompts capability** — `/rag` and `/ingest_pdf` slash-command
-  templates land in a future release. (Provisioning — the `bootstrap` command — lives
+- **No prompts capability** — the server offers tools and resources, not
+  slash-command templates. (Provisioning — the `bootstrap` command — lives
   in the separate [`@vectros-ai/cli`](https://www.npmjs.com/package/@vectros-ai/cli)
   package, above.)
-- **HTTP transport is single-tenant per process** — per-request
-  credential override via incoming Authorization header is a v1.0+
-  enhancement.
+- **HTTP transport is single-tenant per process** — it does not take a
+  per-request credential from the incoming Authorization header.
 - **No Python implementation** — TS only. Python users can `npx`
   this server from any project.
 - **`rag_ask` and `document_ask` are not natively streaming** —
   full answer aggregated before the tool returns. Progress
-  notifications cover the latency. Native MCP-spec streaming lands
-  when the spec stabilizes.
+  notifications cover the latency.
 
-The server is on a pre-1.0 track toward a stable 1.0 release.
+The server is pre-1.0; the [CHANGELOG](./CHANGELOG.md) lists what changed in each release.
 
 ## Rate limits
 

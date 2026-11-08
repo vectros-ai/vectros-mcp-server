@@ -6,9 +6,9 @@
  *                     • range:    `from` + `to`   (range-enabled fields)
  *                     • prefix:   `prefix`        (range-enabled string fields)
  *                   `type` (the document's bound schema type) is required here.
- *   no field      → LIST by folder / owner. `listDocuments` filters by folderId +
- *                     userId/scope only (documents are typed via their bound
- *                     schema, so there is no `type` list filter).
+ *   no field      → LIST, optionally filtered by `type` (the bound schema type),
+ *                     `folderId`, `userId` and `scope`. `type` is forwarded in this
+ *                     mode too: dropping it would return documents of every type.
  *
  * Lookups route through `lookupDocumentsByBody` (POST), NOT the GET variant: the
  * POST body supports equality/range/prefix uniformly, is REQUIRED for SENSITIVE
@@ -64,13 +64,20 @@ const inputSchema = {
     .optional()
     .describe(
       'Lookup mode: sort direction by the looked-up field. `asc` (default) or `desc` — use `desc` with a range/' +
-        'prefix lookup to get the most-recent / highest values first (e.g. latest-N). Ignored in list mode.',
+        'prefix lookup to get the most-recent / highest values first (e.g. latest-N). Refused without `field`.',
     ),
   type: z
     .string()
+    .min(1, 'type must be non-empty: omit it to list every type')
     .optional()
-    .describe('Lookup mode: the document type (the bound schema\'s type). Required with `field`.'),
-  // List-mode args:
+    .describe(
+      'The document type (the bound schema\'s type). Required with `field` (lookup mode); in list mode ' +
+        'it narrows the list to documents of this type. The list filter applies page by page: a page can ' +
+        'hold fewer documents than `limit`, or none, while `nextCursor` is set, so keep paging until ' +
+        '`nextCursor` is null before concluding there are none. For a large collection, hybrid_search with ' +
+        '`typeName` finds documents of one type directly.',
+    ),
+  // List-mode args (`type` above applies to both modes):
   folderId: z.string().optional().describe('List mode: only documents in this folder (Vectros folder id).'),
   userId: z.string().optional().describe('List mode: scope to documents owned by this user.'),
   scope: z
@@ -106,7 +113,9 @@ const documentQuery: ToolFactory = ({ client, log }) => ({
     '  • Lookup on a lookup-indexed field: pass `type` and `field` plus exactly one of ' +
     '`value` (exact), `from`+`to` (range), or `prefix`. Works on sensitive fields ' +
     '(equality only there); range/prefix need a range-enabled field.\n' +
-    '  • List: omit `field`; optionally filter by `folderId`/`userId`/`scope` (`namespace:value`).\n' +
+    '  • List: omit `field`; optionally filter by `type`/`folderId`/`userId`/`scope` (`namespace:value`). ' +
+    'The `type` filter is applied page by page, so a page can be short or empty while `nextCursor` is set: keep ' +
+    'paging before concluding there are none.\n' +
     'Returns a `{ data, nextCursor }` page: `data` holds up to `limit` documents (default 3, max 100 — ' +
     'raise it in one call when you can accept the payload), and a non-null `nextCursor` means more remain — ' +
     'pass it back as `startFrom` to page. Mode is auto-detected. ' +
@@ -171,8 +180,24 @@ const documentQuery: ToolFactory = ({ client, log }) => ({
           'document_query lookup ok',
         );
       } else {
-        // List mode — filter by folder + ownership.
+        // List mode. A lookup argument without `field` would otherwise be dropped and the call
+        // would quietly return an unfiltered list, so it is refused.
+        const strayLookupArgs = (['value', 'from', 'to', 'prefix', 'order'] as const).filter(
+          (k) => args[k] !== undefined,
+        );
+        if (strayLookupArgs.length > 0) {
+          return toolError(
+            'document_query',
+            new Error(
+              `Lookup arguments need 'field' (and 'type'): ${strayLookupArgs.map((k) => `'${k}'`).join(', ')}. ` +
+                "Without 'field' the call lists documents: " +
+                "filter the list with 'type', 'folderId', 'userId' or 'scope'.",
+            ),
+          );
+        }
+        // List mode — filter by type, folder and ownership.
         page = await client.documents.listDocuments({
+          type,
           folderId: args.folderId as string | undefined,
           userId: args.userId as string | undefined,
           scope: args.scope as string | undefined,
@@ -180,7 +205,7 @@ const documentQuery: ToolFactory = ({ client, log }) => ({
           limit,
         });
         log.debug(
-          { tool: 'document_query', mode: 'list', limit, returned: pageItems(page).length },
+          { tool: 'document_query', mode: 'list', type, limit, returned: pageItems(page).length },
           'document_query list ok',
         );
       }

@@ -31,7 +31,7 @@
  *
  * Why this exists: the ownership filters on record_query / document_query /
  * hybrid_search / rag_ask take the Vectros-assigned UUID, but an agent usually
- * holds its OWN identifier (the partner's externalId). This tool bridges the
+ * holds its OWN identifier (your own externalId). This tool bridges the
  * two — resolve once, then scope reads by the returned id.
  *
  * Read-only: requires the credential to allow the relevant read scope

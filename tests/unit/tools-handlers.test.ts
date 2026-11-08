@@ -12,6 +12,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import pino from 'pino';
+import { z } from 'zod';
 
 import hybridSearch from '../../src/tools/hybrid_search.js';
 import recordQuery from '../../src/tools/record_query.js';
@@ -682,6 +683,58 @@ test('document_query list mode routes through listDocuments + unwraps {data}', a
   assert.ok(Array.isArray(body.data), '{ data, nextCursor } page envelope');
   assert.equal(body.data.length, 2);
   assert.equal(body.nextCursor, null);
+});
+
+test('document_query list mode forwards `type` (no `field`) to listDocuments, alongside the other filters', async () => {
+  // Without `field` the call is a list, and `type` must still narrow it: dropping it would
+  // silently return documents of every type to an agent that asked for one.
+  const s = spy();
+  const client = {
+    documents: {
+      listDocuments: async (args: unknown) => {
+        s.record('listDocuments', args);
+        return { data: [{ id: 'doc1' }], nextCursor: null };
+      },
+    },
+  } as never;
+  const tool = documentQuery({ client, log });
+  const r = await tool.handler({ type: 'invoice', folderId: 'fld_a', scope: 'org:o1' }, {});
+  assert.ok(!r.isError);
+  assert.equal(s.calls.length, 1);
+  assert.equal(s.calls[0].method, 'listDocuments', 'type without field is list mode, not a lookup');
+  const a = s.calls[0].args as Record<string, unknown>;
+  assert.equal(a.type, 'invoice', 'type reaches the list call');
+  assert.equal(a.folderId, 'fld_a');
+  assert.equal(a.scope, 'org:o1');
+
+  // And a list call without `type` sends none.
+  await tool.handler({ folderId: 'fld_a' }, {});
+  assert.equal((s.calls[1].args as Record<string, unknown>).type, undefined);
+});
+
+test('document_query refuses lookup arguments without `field` instead of listing unfiltered', async () => {
+  let called = false;
+  const client = {
+    documents: {
+      listDocuments: async () => {
+        called = true;
+        return { data: [], nextCursor: null };
+      },
+    },
+  } as never;
+  const tool = documentQuery({ client, log });
+  for (const args of [{ value: 'MRN-1' }, { prefix: 'a', type: 'invoice' }, { from: '1', to: '2' }, { order: 'desc' }]) {
+    const r = await tool.handler(args, {});
+    assert.equal(r.isError, true, JSON.stringify(args));
+    assert.match(r.content[0]!.text, /need 'field'/);
+  }
+  assert.equal(called, false, 'nothing is sent');
+});
+
+test('document_query refuses an empty type (it would list every type)', () => {
+  const shape = z.object(documentQuery({ client: {} as never, log }).inputSchema).strict();
+  assert.ok(!shape.safeParse({ type: '' }).success);
+  assert.ok(shape.safeParse({ type: 'invoice' }).success);
 });
 
 test('document_query lookup mode routes through lookupDocumentsByBody (POST) + unwraps {data}', async () => {
@@ -2012,7 +2065,9 @@ test('document_ingest file mode (first-time, created:true) reads + uploads + ret
     assert.equal(body.id, 'doc_uploaded');
     assert.equal(body.indexStatus, 'PENDING_INDEX');
     assert.equal(body.status, 'ACTIVE', 'lifecycle status passes through, not clobbered');
-    assert.match(String(body._note), /Poll document_get\(id\) until indexStatus is INDEXED/);
+    assert.match(String(body._note), /Poll document_get\(id\) until indexStatus is INDEXED, /);
+    assert.match(String(body._note), /SKIPPED \(no indexable text; see extraction\.outcome\)/,
+      'a file with no extractable text ends SKIPPED, never INDEXED, so the note must name it as terminal');
     assert.doesNotMatch(String(body._note), /fileItemId/, 'first-time ingest note has no replacement caveat');
   } finally {
     globalThis.fetch = originalFetch;
@@ -2054,7 +2109,7 @@ test('document_ingest file mode (replacement, created:false) warns to watch file
     assert.equal(body.indexStatus, 'PENDING_INDEX', 'still overridden to the post-upload processing state');
     assert.doesNotMatch(
       String(body._note),
-      /Poll document_get\(id\) until indexStatus is INDEXED\./,
+      /Poll document_get\(id\) until indexStatus is INDEXED, /,
       'replacement note does not repeat the misleading indexStatus-only guidance',
     );
     assert.match(String(body._note), /fileItemId/, 'replacement note points at fileItemId as the adoption signal');
@@ -3109,6 +3164,23 @@ test('version_history dispatches record vs document and returns {data, nextCurso
   const rd = await tool.handler({ resourceType: 'document', id: 'd1' }, {});
   assert.equal(s.calls[1].method, 'getDocumentVersions');
   assert.equal((parsedText(rd) as { nextCursor: string | null }).nextCursor, null);
+});
+
+test('version_history returns each entry as the API sent it, actingVia included', async () => {
+  const entry = {
+    changeType: 'UPDATE',
+    changedBy: 'key_1',
+    actingVia: { kind: 'agent-run', actorId: 'agt_1', runId: 'run_1', tool: 'records_update' },
+  };
+  const client = {
+    records: { getRecordVersions: async () => ({ data: [entry, { changeType: 'CREATE', changedBy: 'key_1' }], nextCursor: null }) },
+  } as never;
+  const tool = versionHistory({ client, log });
+
+  const r = await tool.handler({ resourceType: 'record', id: 'r1' }, {});
+  const body = parsedText(r) as { data: Array<Record<string, unknown>> };
+  assert.deepEqual(body.data[0], entry);
+  assert.equal('actingVia' in body.data[1]!, false);
 });
 
 test('version_history surfaces a backend error as isError', async () => {

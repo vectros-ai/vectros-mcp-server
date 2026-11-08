@@ -83,7 +83,7 @@ export interface VectrosMCPServerOptions {
   logger?: Logger;
   /**
    * Which transport this server will be wired up with. Optional; only
-   * affects tool behavior that depends on partner-local-fs access
+   * affects tool behavior that depends on local filesystem access
    * (currently `document_ingest`'s filePath mode is stdio-only). The
    * CLI entry points set this — `cli.ts` passes 'stdio', the v0.2
    * `cli-http.ts` passes 'http'. Programmatic embedders default to
@@ -93,7 +93,7 @@ export interface VectrosMCPServerOptions {
   /**
    * If true (default in v0.2), perform a GET /v1/ping check during
    * `connect()` to fail-fast on bad credentials BEFORE the MCP
-   * client sends its first tool call. The default is safe — partners
+   * client sends its first tool call. The default is safe — callers
    * who don't want the network roundtrip on startup can set false,
    * but the trade-off is "credential failures surface mid-tool-call
    * rather than at startup."
@@ -329,7 +329,7 @@ export class VectrosMCPServer {
    *
    * If `validateOnStart` (default true) is enabled, performs a
    * GET /v1/ping check BEFORE wiring the transport. On failure,
-   * throws — the partner's MCP client sees a startup error instead
+   * throws — your MCP client sees a startup error instead
    * of a confusing "tools work but the first call 401s" experience.
    */
   async connect(transport: Transport): Promise<void> {

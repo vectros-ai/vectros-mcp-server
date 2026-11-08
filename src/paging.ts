@@ -2,7 +2,7 @@
  * Pagination helpers for the `{ data, nextCursor }` page envelope.
  *
  * As of SDK 0.23 (surface-freeze), the
- * list/lookup partner-API methods — `schemas.listSchemas`,
+ * list/lookup API methods — `schemas.listSchemas`,
  * `records.listRecords`, `records.lookupRecords` — return this paged envelope
  * rather than a bare array. The MCP tools serialize their result straight into
  * the agent's context window, so we unwrap the envelope here to keep the

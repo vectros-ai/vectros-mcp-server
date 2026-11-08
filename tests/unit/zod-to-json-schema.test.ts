@@ -38,8 +38,8 @@ test('descriptions are preserved through .describe()', () => {
 });
 
 test('description is preserved even when wrapped in optional/default/nullable', () => {
-  // Description survives unwrap because we capture it from the OUTER
-  // (wrapped) schema before unwrapping.
+  // A wrapper does not inherit its inner schema's description, so the converter reads every
+  // wrapper layer on the way in and takes the outermost description it finds.
   const out1 = zodTypeToJsonSchema(z.string().describe('opt').optional());
   assert.equal(out1.description, 'opt');
   assert.equal(out1.type, 'string', 'unwrapped optional reveals string');
@@ -99,8 +99,8 @@ test('z.record converts to type:object with additionalProperties (not an empty f
   assert.equal(out.description, 'a payload map');
   assert.deepEqual(out.additionalProperties, {}, 'unknown value type → open additionalProperties');
 
-  // The single-arg form (value-only) is also handled.
-  const typed = zodTypeToJsonSchema(z.record(z.string()));
+  // A typed value schema is described, not dropped.
+  const typed = zodTypeToJsonSchema(z.record(z.string(), z.string()));
   assert.equal(typed.type, 'object');
   assert.deepEqual(typed.additionalProperties, { type: 'string' });
 });

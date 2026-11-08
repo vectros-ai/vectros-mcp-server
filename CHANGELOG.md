@@ -3,6 +3,37 @@
 All notable changes to `@vectros-ai/mcp-server` are documented here.
 This project adheres to [Semantic Versioning](https://semver.org).
 
+## 0.19.0 — 2026-11-07
+
+### Added
+
+- **Tools `agent_list`, `agent_run` and `run_get`** (23 to 26 tools, registered by default; `VECTROS_MCP_TOOLS` is an allow-list).
+  - `agent_list` lists the agents you can run (`id`, `name`, `description`, `latestVersion`, `status`; 10 per page by default, at most 100;
+    `includeRetired`) in your credential's app context. It never returns a system prompt or tools. Needs `runs:c` or `agents:r`.
+  - `agent_run` runs a stored agent on an `input` (1 to 100,000 characters, at most 240,000 bytes JSON-encoded) and returns
+    `{ runId, agentId, agentVersion, status, terminal, reason, errorCode, text, toolCalls, charged }`; `charged` is in milli-cents.
+    Parameters: `maxInferenceCents` (only lowers the agent's budget; below the minimum is `BUDGET_TOO_LOW` and nothing starts),
+    `readOnly` (refuse every tool call that changes data), `agentVersion`, and `idempotencyKey` (1 to 128 letters, digits, `.`, `_`,
+    `:` or `-`; the same key again returns that run with `alreadyStarted: true` and no answer text). Needs `runs:c` and agent runs
+    switched on for your tenant. **It spends money and may change data with your permissions,** so it is marked destructive.
+  - `run_get` reads a run by id (status, whether it ended, why, tool calls, charge; never the answer text). Needs `runs:r`. A result with
+    `terminal: false` means the stream ended early: read the run with `run_get`.
+- **`document_query` takes `type` in list mode,** alongside `folderId`, `userId` and `scope`; the filter applies page by page, so a page
+  can be short or empty while `nextCursor` is set. A lookup argument without `field` is refused.
+
+### Changed
+
+- **`rag_ask` and `document_ask` report a call's cost as `usage.inferenceBalanceCentsChargedMilli` (1 cent = 1000),** replacing
+  `inferenceBalanceCentsCharged`; divide by 1000 for cents.
+- **`version_history` entries made by an agent run carry `actingVia`** (`kind`, `actorId`, `runId`, `tool`) beside `changedBy`.
+- **`document_ingest` and `document_get` handle a file with no extractable text:** polling waits for any terminal `indexStatus`
+  (`INDEXED`, `SKIPPED`, `STORED` or `FAILED`); `extraction.outcome` says why a file ended `SKIPPED`.
+- **The server runs on zod 4.** An integer argument beyond JavaScript's safe-integer range is refused, and the wording of argument
+  errors changes (`Invalid input: expected string, received number`): match on the argument name, not the text.
+- **Every array argument has a size limit:** `scopes` at most 2 (`document_ingest`, `document_update`, `folder_create`,
+  `folder_update`, `record_create`, each `record_batch_write` item), `scopeFilters` 16 and `contentTypes` 2 (`hybrid_search` and the
+  `search` object of `rag_ask`); a longer array is refused.
+
 ## 0.18.2 — 2026-10-25
 
 ### Changed
