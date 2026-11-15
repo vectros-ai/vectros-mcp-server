@@ -164,3 +164,57 @@ test('toolError treats a non-object / empty body defensively (no throw, falls ba
     assert.doesNotMatch(r.content[0].text, /requestId:/);
   }
 });
+
+test('toolError passes the refusal\'s other body fields through, one line each, after errorCode', () => {
+  const err = Object.assign(new Error('BadRequestError'), {
+    statusCode: 400,
+    body: {
+      message: 'This image type is not accepted.',
+      errorCode: 'MEDIA_FORMAT_NOT_ACCEPTED',
+      requestId: 'req_1',
+      acceptedTypes: ['image/jpeg', 'image/png'],
+      convertTo: 'image/jpeg',
+      ignored: null,
+    },
+  });
+  const text = toolError('document_ingest', err).content[0].text;
+  assert.match(text, /errorCode: MEDIA_FORMAT_NOT_ACCEPTED\nacceptedTypes: \["image\/jpeg","image\/png"\]\nconvertTo: image\/jpeg\nrequestId: req_1/);
+  assert.doesNotMatch(text, /ignored/, 'a null field is not printed');
+  assert.equal((text.match(/This image type is not accepted\./g) ?? []).length, 1, 'the message is not repeated');
+});
+
+test('toolError: an agent budget refusal says when it resets; extra fields are bounded', () => {
+  const capped = Object.assign(new Error('PaymentRequiredError'), {
+    statusCode: 402,
+    body: { message: 'This agent has reached its DAY cap.', errorCode: 'AGENT_BUDGET_EXHAUSTED', period: 'DAY', resetsAt: '2026-11-13T05:00:00Z' },
+  });
+  assert.match(toolError('agent_run', capped).content[0].text, /period: DAY\nresetsAt: 2026-11-13T05:00:00Z/);
+  const many: Record<string, unknown> = { message: 'm' };
+  for (let i = 0; i < 15; i++) many[`f${i}`] = 'x'.repeat(800);
+  const text = toolError('t', Object.assign(new Error('E'), { statusCode: 400, body: many })).content[0].text;
+  assert.equal((text.match(/\nf\d+: /g) ?? []).length, 10, 'at most 10 extra fields');
+  assert.match(text, /\nf0: x{500}…/, 'each value cut at 500 characters');
+});
+
+test('toolError: a line break in a value cannot forge another line, and only identifier-shaped field names are printed', () => {
+  const err = Object.assign(new Error('E'), {
+    statusCode: 400,
+    body: { message: 'm', errorCode: 'REAL', detail: 'a\nerrorCode: FAKE\r\nrequestId: forged', 'bad key\nerrorCode': 'x', nested: { a: [1, 2] } },
+  });
+  const text = toolError('t', err).content[0].text;
+  assert.equal((text.match(/^errorCode: /gm) ?? []).length, 1, 'one errorCode line');
+  assert.match(text, /\ndetail: a errorCode: FAKE requestId: forged/);
+  assert.doesNotMatch(text, /bad key/);
+  assert.match(text, /\nnested: \{"a":\[1,2\]\}/);
+});
+
+test('toolError: every line-break character is flattened, and a reserved name in another letter case is not printed', () => {
+  const err = Object.assign(new Error('E'), {
+    statusCode: 400,
+    body: { message: 'm', errorCode: 'REAL', Errorcode: 'FAKE', RequestId: 'forged', detail: 'a\u0085b\vc\fd' },
+  });
+  const text = toolError('t', err).content[0].text;
+  assert.doesNotMatch(text, /FAKE|forged/);
+  assert.match(text, /\ndetail: a b c d/);
+});
+

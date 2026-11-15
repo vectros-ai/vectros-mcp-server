@@ -246,7 +246,7 @@ export function redactDetail(message: string): string {
   // Redaction strictly precedes truncation, so a cut can never expose the prefix
   // of a key the match would have caught.
   //
-  // Honest about the limit: this is a shape denylist, so it means "no
+  // The limit: this is a shape denylist, so it means "no
   // currently-shaped key", not "no secret". A key split across whitespace still
   // leaks its tail (the match stops at the break), and a future prefix is by
   // definition uncovered — which is the point of only ever passing the CLI's own

@@ -4,7 +4,7 @@
  * Lists the stored agents an MCP client can run with `agent_run`. Each agent is
  * returned as a summary (`id`, `name`, `description`, `latestVersion`, `status`)
  * whatever the credential's scopes: a credential holding only `runs:c` is given
- * exactly these fields by the API, and one that also holds `agents:r` is given the
+ * exactly these fields by the API (for the agents its grant covers), and one that also holds `agents:r` is given the
  * whole definition (system prompt, tools, limits), which this tool leaves out so
  * the result has one shape and stays small in the agent's context. Reading how an
  * agent is defined is an administrative task outside this tool.
@@ -74,7 +74,8 @@ const agentList: ToolFactory = ({ client, log }) => ({
     '`description`, `latestVersion` and `status`; only an `ACTIVE` agent can be run. Retired and purged agents are ' +
     'left out unless `includeRetired` is true. Returns a `{ data, nextCursor }` page: a non-null `nextCursor` means more ' +
     'remain, pass it back as `startFrom`. Needs the `runs:c` or `agents:r` scope; running a listed agent needs ' +
-    '`runs:c`, so a credential with only `agents:r` can list agents but not run them.',
+    '`runs:c` for it, so a credential with only `agents:r` can list agents but not run them. A `runs:c` grant that ' +
+    'names agents (`runs:c:<agent>`) lists only those agents.',
   inputSchema,
   // A pure read: it lists definitions and changes nothing.
   annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true },

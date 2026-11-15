@@ -116,7 +116,7 @@ test('the extension long_description tool count tracks the real tool registry', 
 });
 
 test('the documented tool count tracks the real tool registry', () => {
-  // The VECTROS_MCP_TOOLS env description states "all N tools" — keep N honest
+  // The VECTROS_MCP_TOOLS env description states "all N tools" — keep N accurate
   // so a tool added/removed in the registry forces a manifest copy update.
   const env = pkgs.environmentVariables as Array<Record<string, unknown>>;
   const toolsVar = env.find((e) => e.name === 'VECTROS_MCP_TOOLS');

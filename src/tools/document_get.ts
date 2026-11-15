@@ -82,6 +82,18 @@ function isNotAvailable(err: unknown): boolean {
   return e.statusCode === 404 || e.statusCode === 400;
 }
 
+/**
+ * The text read's own "not available" cases: the two above, and a document of a public-media type, which holds an image and
+ * no text (the platform answers `409` with `errorCode` `NO_TEXT_FOR_MEDIA`). Any other 409 is a real error.
+ */
+function isTextNotAvailable(err: unknown): boolean {
+  if (isNotAvailable(err)) return true;
+  if (!(err instanceof Error)) return false;
+  const e = err as Error & { statusCode?: number; body?: unknown };
+  const body = e.body && typeof e.body === 'object' ? (e.body as { errorCode?: unknown }) : undefined;
+  return e.statusCode === 409 && body?.errorCode === 'NO_TEXT_FOR_MEDIA';
+}
+
 const documentGet: ToolFactory = ({ client, log }) => ({
   name: 'document_get',
   title: 'Get document metadata (and optionally text)',
@@ -91,14 +103,15 @@ const documentGet: ToolFactory = ({ client, log }) => ({
     '(capped at ~8K tokens; `truncated: true` flag if cut). Text is available for every text-ingested ' +
     'document and for file-ingested documents unless they were uploaded with `storeText: false` (extracted ' +
     'text discarded after indexing) or no text could be extracted from the file (`extraction.outcome` other ' +
-    'than OK/TRUNCATED, e.g. an image or a scanned page) — then `textAvailable: false` is set; the original file is still ' +
+    'than OK/TRUNCATED, e.g. a scanned page, or NOT_EXTRACTED for audio, video, an image or an archive), and never for a document of a public-media type (an image) — then `textAvailable: false` is set; the original file is still ' +
     'retrievable via `includeDownloadUrl`. Pass `includeDownloadUrl: true` to also ' +
     'get a short-lived presigned `downloadUrl` for the original file (file-backed documents only). ' +
     'Returns the full document metadata, including its lifecycle `status` (ACTIVE, or ARCHIVED when ' +
     'soft-retracted from search — restorable via document_update) and its processing `indexStatus`. When ' +
     '`indexStatus` is FAILED the response also carries `indexFailure` with a machine-readable `code` telling ' +
     'you whether the content is still findable — e.g. TEXT_INDEX_FAILED / VECTOR_LIMIT_EXCEEDED (one leg ' +
-    'still serves it) vs INDEXING_FAILED (not findable by search at all). Branch on `code`, not on the message.',
+    'still serves it) vs INDEXING_FAILED (not findable by search at all). Branch on `code`, not on the message.' +
+    ' An `INDEXED` item can also carry `indexFailure` with code LOCATION_NOT_INDEXED: a value in one of its `geo` fields is not a valid point, so it was indexed without that location and a location search does not find it.',
   inputSchema,
   // A pure read — never creates, modifies, or deletes anything server-side.
   annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true },
@@ -118,17 +131,17 @@ const documentGet: ToolFactory = ({ client, log }) => ({
       let extra: Record<string, unknown> = {};
 
       if (includeText) {
-        // Second call — swallow 404 gracefully (text not retained, or none could be extracted).
+        // Second call — swallow "no text" gracefully (not retained, none could be extracted, or a public-media document).
         try {
           const textResponse = await client.documents.getDocumentText({ id });
           const rawText = textResponse?.text ?? '';
           const { text, truncated } = truncateText(rawText);
           extra = { ...extra, text, truncated, textAvailable: true };
         } catch (textErr) {
-          if (isNotAvailable(textErr)) {
+          if (isTextNotAvailable(textErr)) {
             log.debug(
               { tool: 'document_get', id },
-              'document_get text unavailable (not retained, or no text could be extracted from the file)',
+              'document_get text unavailable (not retained, no text could be extracted from the file, or a public-media document)',
             );
             extra = { ...extra, textAvailable: false };
           } else {

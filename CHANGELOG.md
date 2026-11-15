@@ -3,6 +3,29 @@
 All notable changes to `@vectros-ai/mcp-server` are documented here.
 This project adheres to [Semantic Versioning](https://semver.org).
 
+## 0.20.0 — 2026-11-14
+
+### Changed
+
+- **The bundled `@vectros-ai/sdk` is 0.50.0.**
+- **`current_identity` (tool and resource) names `public-publish` and `script-egress-declare`** among the capabilities
+  `/v1/ping` does not report.
+- **`document_ingest` infers more media types from the `filePath` extension** (Office, OpenDocument, EPUB, e-mail, XML, YAML,
+  TSV, and common image, audio, video and zip files), which were sent as `application/octet-stream`. Text is extracted only from
+  document formats; other files are stored, with `extraction.outcome` `NOT_EXTRACTED`.
+- **`document_ingest` file uploads send `size`,** so the upload is signed for that length and media type and a body that does not
+  match is refused before anything is stored. The `PUT` sends every header in `requiredHeaders`. A file of a public-media type can
+  be uploaded. An empty file is sent without `size`.
+- **`agent_list` and `agent_run` describe per-agent grants (`runs:c:<agent>`).**
+- **A tool error lists the other fields of the API's error body** besides `errorCode` and `requestId` (at most 10, each cut at
+  500 characters).
+- **`document_get` and `record_get` describe the `LOCATION_NOT_INDEXED` index failure:** a `geo` value that is not a valid point.
+
+### Fixed
+
+- **`document_get` with `includeText: true` returns a public-media document's metadata with `textAvailable: false`** instead of
+  an error.
+
 ## 0.19.0 — 2026-11-07
 
 ### Added

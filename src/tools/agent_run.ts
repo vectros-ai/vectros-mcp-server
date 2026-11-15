@@ -27,7 +27,7 @@
  * itself then fails without a clear refusal, the error carries the idempotency
  * key, so a retry names any run that did start.
  *
- * Needs the `runs:c` scope, and agent runs switched on for the tenant by an
+ * Needs the `runs:c` scope for the agent (bare, or naming it: `runs:c:<agent>`), and agent runs switched on for the tenant by an
  * account owner. Only `runs:c` is exercised: the tool reads nothing else first.
  */
 import { randomUUID } from 'node:crypto';
@@ -105,14 +105,14 @@ const agentRun: ToolFactory = ({ client, log }) => ({
     'you, with your own permissions, and only through the tools the agent lists; set `readOnly` to refuse every ' +
     'tool call that would change data. Cap the run\'s model cost with `maxInferenceCents` (it can only lower the ' +
     'agent\'s own budget). The run is billed: model calls against your inference balance, and a fee per run, tool ' +
-    'calls and run time against your plan. An agent can search the web or fetch a page when its definition lists ' +
-    'that web tool (web fetch also needs your tenant\'s owner to switch it on, and a run of an agent that lists ' +
-    '`web_search` is refused while the platform has web search disabled). Returns `{ runId, agentId, agentVersion, status, terminal, reason, ' +
+    'calls and run time against your plan. An agent can fetch a page when its definition lists `web_fetch` and your ' +
+    'tenant\'s owner has switched it on; a run of an agent that lists `web_search` is refused while web search is off ' +
+    'on the platform, as it is by default. Returns `{ runId, agentId, agentVersion, status, terminal, reason, ' +
     'errorCode, text, toolCalls, charged }`; `charged` carries the run\'s charge and refund in milli-cents (1 cent = 1000). Progress notifications keep the call ' +
     'alive while the run works for a client that resets its timeout on progress; cancelling the call cancels the ' +
     'run once the run is named (almost at once). If `terminal` is false the result arrived ' +
     'before the run ended: read it with run_get, which needs `runs:r` as well. Calling again without ' +
-    '`idempotencyKey` starts a new, billed run. Needs the `runs:c` scope.',
+    '`idempotencyKey` starts a new, billed run. Needs the `runs:c` scope for this agent: a bare `runs:c`, or `runs:c:<agent>` naming it.',
   inputSchema,
   // Not a read: a run is billed, and its tool calls may create, change or delete data with the
   // caller's permissions, so a host should confirm it. Not idempotent: each call is a new paid run

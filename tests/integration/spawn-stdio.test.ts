@@ -104,7 +104,7 @@ test('spawn stdio server + handshake + list_tools', async () => {
       assert.equal(typeof t.annotations!.idempotentHint, 'boolean', `${t.name}: idempotentHint is a boolean`);
     }
     // Spot-check the two ends of the spectrum, so a wrong hint (not just a missing
-    // one) would fail this test — "annotate honestly" per the issue this closes.
+    // one) would fail this test, as the issue this closes requires.
     assert.deepEqual(
       byName.get('record_get')!.annotations,
       { readOnlyHint: true, destructiveHint: false, idempotentHint: true },

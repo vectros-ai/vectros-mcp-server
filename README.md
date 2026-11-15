@@ -10,16 +10,16 @@
 > One-click badges install the **server entry** in your client. You still supply
 > a key — run `npx -y @vectros-ai/cli bootstrap` (recommended) or paste your
 > `ssk_...`. See [Connect from your client](#connect-from-your-client) and the
-> [honest caveats](#honest-caveats).
+> [limits](#limits).
 
 A [Model Context Protocol](https://modelcontextprotocol.io) server for
-**Vectros** — a typed, multi-tenant **record store unified with hybrid
-search** and citation-grounded RAG. Deterministic lookups and enumeration
-*and* semantic search over one isolated, per-customer index of records and
-documents — so an agent gets memory that's precise, not just fuzzy recall.
-Reached agent-natively here over MCP (Claude Desktop, Cursor, Claude Code,
-Cline, Continue, VS Code, hosted platforms) — and the same data is
-human-accessible through the Vectros app + SDKs.
+**Vectros**, a backend-as-a-service built for AI products: a typed database,
+document ingestion, hybrid search, secure inference and serverless functions,
+behind one API. Every caller, whether a person, an agent or your own code,
+gets exactly the access you define, walled off from every other customer.
+This server is how an agent reaches your data: from Claude Desktop, Cursor,
+Claude Code, Cline, Continue, VS Code or a hosted platform, under the same
+access policy as your app and SDK calls.
 
 ```
 npx -y @vectros-ai/mcp-server
@@ -28,10 +28,10 @@ npx -y @vectros-ai/mcp-server
 Your agent can search your indexed corpus, query structured records,
 ingest documents, ask questions grounded against documents, and run the
 agents you have stored. The server itself makes no call to the web; a stored
-agent you run can search the web (`web_search`) or fetch a page (`web_fetch`)
-when its definition lists that tool. Web fetch also needs your tenant's owner
-to switch it on, and a run of an agent that lists `web_search` is refused while
-the platform has web search disabled.
+agent you run can fetch a page (`web_fetch`) when its definition lists that
+tool and your tenant's owner has switched it on. A run of an agent that lists
+`web_search` is refused while web search is off on the platform, as it is by
+default.
 
 ## Quick start — one command
 
@@ -109,18 +109,18 @@ args = ["-y", "@vectros-ai/mcp-server"]
 env = { VECTROS_API_KEY = "ssk_live_..." }
 ```
 
-## Honest caveats
+## Limits
 
-Precision is the pitch — what this server deliberately does *not* do:
+What this server deliberately does *not* do:
 
 - **There's a human step.** Bootstrap needs a developer-portal sign-in / bridge
   token. One command, but a person signs in — there is no fully unattended
   provisioning.
-- **Web search comes through your agents.** The server itself makes no call to the web:
+- **Web access comes through your agents.** The server itself makes no call to the web:
   Vectros is the memory, not the browser. `agent_run` on a stored agent whose definition
-  lists `web_search` or `web_fetch` can search the web or fetch a page; web fetch also
-  needs your tenant's owner to switch it on, and web search needs the platform to have
-  it enabled (otherwise the run is refused).
+  lists `web_fetch` can fetch a page once your tenant's owner switches it on. Web search is
+  off on the platform by default, and a run of an agent that lists `web_search` is then
+  refused.
 - **Agent document upload is text-inline.** An agent ingests document text
   inline; on the stdio transport a jailed local-file upload is supported, but
   bulk file upload from the agent surface isn't the path.
@@ -278,7 +278,7 @@ resolves to its main repo's `.mcp.json` — add and open from the same project.
 
 | Tool | What it does |
 |---|---|
-| `current_identity` | Describe the credential: tenantId, environment, principalType, principalKeyId, principalLabel, and (for scoped credentials) allowedActions + dataScope. Does **not** include `granted_capabilities` (`member-lifecycle` / `forensic-read` / `context-directory-read` / `delegate-mint`, as of API 0.40.0, joined by `delegate-principal-stamp` in 0.42.0 and `trigger-control-plane-grant` in 0.44.0) — a separate reach dimension a scope clause can carry that `/v1/ping` doesn't report, so allowedActions + dataScope may understate a credential's true reach. Also reports this server's own version and the bundled SDK version (`mcpServerVersion`, `sdkVersion`). |
+| `current_identity` | Describe the credential: tenantId, environment, principalType, principalKeyId, principalLabel, and (for scoped credentials) allowedActions + dataScope. Does **not** include `granted_capabilities` (`member-lifecycle` / `forensic-read` / `context-directory-read` / `delegate-mint`, as of API 0.40.0, joined by `delegate-principal-stamp` in 0.42.0, `trigger-control-plane-grant` in 0.44.0, and `public-publish` and `script-egress-declare` in 0.50.0) — a separate reach dimension a scope clause can carry that `/v1/ping` doesn't report, so allowedActions + dataScope may understate a credential's true reach. Also reports this server's own version and the bundled SDK version (`mcpServerVersion`, `sdkVersion`). |
 | `lookup_principal` | Resolve a user, or an identity entity in a namespace (`org`/`client`/any namespace you registered), by your own `externalId` (→ its Vectros UUID, for the ownership filters) or by a schema lookup field. Pass `contextId` to target a specific app context for a context-owned namespace. Read-only. |
 | `version_history` | Read the audit/version trail (CREATE/UPDATE/DELETE, with actor + diff) for one record or document. Read-only. |
 
@@ -286,8 +286,8 @@ resolves to its main repo's `.mcp.json` — add and open from the same project.
 
 | Tool | What it does |
 |---|---|
-| `agent_list` | List the stored agents (running one needs `runs:c`), as each one's `id`, `name`, `description`, `latestVersion` and `status` (paginated via `nextCursor`; retired and purged agents only with `includeRetired`), in your credential's own app context, the one `agent_run` runs in. Needs `runs:c` or `agents:r`. Read-only. |
-| `agent_run` | Run a stored agent on one `input` and return its answer: `{ runId, agentId, agentVersion, status, terminal, reason, errorCode, text, toolCalls, charged }`; `charged` carries the run's charge and refund in milli-cents (1 cent = 1000). `maxInferenceCents` caps the run's model cost (it can only lower the agent's own budget) and `readOnly` refuses every tool call that would change data. The run's tool calls act as you, with your permissions, and only through the tools the agent lists. Progress notifications keep the call alive while the run works (for a client that resets its timeout on progress); cancelling the call cancels the run once it is named. The server itself makes no call to the web; a stored agent can search the web or fetch a page when its definition lists that web tool (web fetch also needs your tenant's owner to switch it on, and web search needs the platform to have it enabled: otherwise the run is refused). Billed, and flagged destructive so your MCP client asks before it runs. Needs `runs:c`. |
+| `agent_list` | List the stored agents (running one needs `runs:c`), as each one's `id`, `name`, `description`, `latestVersion` and `status` (paginated via `nextCursor`; retired and purged agents only with `includeRetired`), in your credential's own app context, the one `agent_run` runs in. Needs `runs:c` or `agents:r`; a `runs:c` grant that names agents (`runs:c:<agent>`) lists only those. Read-only. |
+| `agent_run` | Run a stored agent on one `input` and return its answer: `{ runId, agentId, agentVersion, status, terminal, reason, errorCode, text, toolCalls, charged }`; `charged` carries the run's charge and refund in milli-cents (1 cent = 1000). `maxInferenceCents` caps the run's model cost (it can only lower the agent's own budget) and `readOnly` refuses every tool call that would change data. The run's tool calls act as you, with your permissions, and only through the tools the agent lists. Progress notifications keep the call alive while the run works (for a client that resets its timeout on progress); cancelling the call cancels the run once it is named. The server itself makes no call to the web; a stored agent can fetch a page when its definition lists `web_fetch` and your tenant's owner has switched it on (a run of an agent that lists `web_search` is refused while web search is off on the platform, as it is by default). Billed, and flagged destructive so your MCP client asks before it runs. Needs `runs:c`. |
 | `run_get` | Read one run by id: `status`, `terminal`, `reason`, `errorCode`, its tool calls (never their arguments or results) and `usage`. Use it when `agent_run` returns `terminal: false`. Needs `runs:r`, which `runs:c` does not include. Read-only. |
 
 **Running agents.** The three agent tools are registered by default, like every other tool, so **after upgrading,
@@ -299,7 +299,8 @@ model calls against your inference balance (a prepaid account reserves the budge
 what was not used), and a fee per run, tool calls and run time against your plan. Three things on the platform side
 decide whether a call can start a run at all:
 
-1. **The credential needs the `runs:c` scope.** Without it `agent_run` returns `403`. Reading a run with `run_get`
+1. **The credential needs the `runs:c` scope for the agent.** A bare `runs:c` covers every agent; `runs:c:<agent>` covers that
+   one only. Without it `agent_run` returns `403`. Reading a run with `run_get`
    needs `runs:r` as well, which `runs:c` does not include: a credential with only `runs:c` learns how its runs end
    only from `agent_run`'s own result. `agent_list` works with `runs:c` or `agents:r`; a credential with only
    `agents:r` can list agents but not run them.

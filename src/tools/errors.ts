@@ -28,6 +28,52 @@ interface VectrosErrorBody {
   requestId?: string;
 }
 
+/** The body fields reported on their own lines; every other top-level field is passed through after them. */
+const NAMED_BODY_FIELDS: ReadonlySet<string> = new Set(['message', 'errorCode', 'requestId']);
+/** Compared in any letter case, so no extra field can pose as one of them (`Errorcode`, `RequestId`). */
+const NAMED_BODY_FIELDS_LOWER: ReadonlySet<string> = new Set([...NAMED_BODY_FIELDS].map((k) => k.toLowerCase()));
+/** At most this many extra fields, each value cut to this many characters: an error stays readable in an agent's context. */
+const MAX_EXTRA_FIELDS = 10;
+const MAX_EXTRA_VALUE_CHARS = 500;
+
+/**
+ * The refusal's other fields, one `name: value` line each (values as JSON), so an agent sees what the API added to explain it: for
+ * example the image types a media upload accepts (`acceptedTypes`, `convertTo`) or when a capped agent can run again (`period`,
+ * `resetsAt`).
+ */
+function extraBodyLines(body: unknown): string {
+  if (!body || typeof body !== 'object' || Array.isArray(body)) return '';
+  const lines: string[] = [];
+  for (const [key, value] of Object.entries(body as Record<string, unknown>)) {
+    // Only identifier-shaped names, so a field cannot pose as another line of the error.
+    if (
+      NAMED_BODY_FIELDS_LOWER.has(key.toLowerCase()) ||
+      !/^[A-Za-z][A-Za-z0-9_]{0,63}$/.test(key) ||
+      value === undefined ||
+      value === null
+    ) {
+      continue;
+    }
+    if (lines.length >= MAX_EXTRA_FIELDS) break;
+    let text: string;
+    try {
+      text = typeof value === 'string' ? value : JSON.stringify(value);
+    } catch {
+      continue;
+    }
+    if (text === undefined) continue;
+    // One line per field: a line break in a value could otherwise forge an `errorCode:` or `requestId:` line.
+    text = text.replace(/[\r\n\v\f\u0085\u2028\u2029]+/g, ' ');
+    if (text.length > MAX_EXTRA_VALUE_CHARS) {
+      // Never cut a surrogate pair in half.
+      const end = /[\uD800-\uDBFF]/.test(text.charAt(MAX_EXTRA_VALUE_CHARS - 1)) ? MAX_EXTRA_VALUE_CHARS - 1 : MAX_EXTRA_VALUE_CHARS;
+      text = `${text.slice(0, end)}…`;
+    }
+    lines.push(`\n${key}: ${text}`);
+  }
+  return lines.join('');
+}
+
 function asErrorBody(body: unknown): VectrosErrorBody | undefined {
   if (body && typeof body === 'object') return body as VectrosErrorBody;
   return undefined;
@@ -49,6 +95,7 @@ export function toolError(toolName: string, err: unknown, docPointer?: string): 
   let detail = String(err);
   let errorCode: string | undefined;
   let requestId: string | undefined;
+  let extra = '';
 
   if (err instanceof StreamError) {
     summary = `${toolName} stream error`;
@@ -64,6 +111,7 @@ export function toolError(toolName: string, err: unknown, docPointer?: string): 
       if (typeof body.message === 'string' && body.message.trim().length > 0) detail = body.message;
       if (typeof body.errorCode === 'string' && body.errorCode.length > 0) errorCode = body.errorCode;
       if (typeof body.requestId === 'string' && body.requestId.length > 0) requestId = body.requestId;
+      extra = extraBodyLines(e.body);
     }
     if (e.statusCode) {
       summary = `${toolName} failed: HTTP ${e.statusCode}${errorCode ? ` (${errorCode})` : ''}`;
@@ -74,6 +122,7 @@ export function toolError(toolName: string, err: unknown, docPointer?: string): 
 
   const trailer =
     (errorCode ? `\nerrorCode: ${errorCode}` : '') +
+    extra +
     (requestId ? `\nrequestId: ${requestId}` : '') +
     (docPointer ? `\n\nSee: ${docPointer}` : '');
 

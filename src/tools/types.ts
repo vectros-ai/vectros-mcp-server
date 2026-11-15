@@ -103,7 +103,7 @@ export interface ToolDefinition<S extends ZodRawShape = ZodRawShape> {
    * The spec is explicit that these are HINTS, not guarantees a client should trust from
    * an untrusted server — but a wrong hint is worse than none: it teaches a host to skip
    * confirmation on a call that actually writes or deletes. Every factory below sets this
-   * honestly, verified against what its own handler actually calls, not assumed from the
+   * correctly, verified against what its own handler actually calls, not assumed from the
    * tool's name.
    */
   annotations?: ToolAnnotations;

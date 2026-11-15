@@ -307,6 +307,14 @@ test('current_identity names trigger-control-plane-grant among the capabilities 
   assert.match(String(tools.current_identity.description), /trigger-control-plane-grant/);
 });
 
+test('current_identity names public-publish among the capabilities it does not report', () => {
+  assert.match(String(tools.current_identity.description), /public-publish/);
+});
+
+test('current_identity names script-egress-declare among the capabilities it does not report', () => {
+  assert.match(String(tools.current_identity.description), /script-egress-declare/);
+});
+
 // What an agent reads about the generation limits has to match what the platform does with the default model: the
 // models that reason count the reasoning against `maxTokens`, and the same models ignore a `temperature`.
 test('rag_ask and document_ask maxTokens say that reasoning counts against it', () => {

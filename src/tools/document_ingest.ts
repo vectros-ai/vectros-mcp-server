@@ -122,22 +122,54 @@ async function resolveJailedPath(filePath: string, ingestRoot: string): Promise<
   return canonical;
 }
 
-// Minimal MIME-type lookup for common file types. Callers can
-// explicitly pass fileType to override.
+// The media type sent for a file, from its extension; the caller can pass fileType to override. The
+// server decides whether text is extracted from the file's content, not from this type, so it is a label:
+// an unknown extension is sent as application/octet-stream, and the server infers from the name in turn.
 const EXT_TO_MIME: Record<string, string> = {
   '.pdf': 'application/pdf',
   '.txt': 'text/plain',
+  '.log': 'text/plain',
   '.md': 'text/markdown',
+  '.markdown': 'text/markdown',
   '.html': 'text/html',
   '.htm': 'text/html',
+  '.xml': 'application/xml',
   '.json': 'application/json',
+  '.yaml': 'application/yaml',
+  '.yml': 'application/yaml',
   '.csv': 'text/csv',
-  '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-  '.doc': 'application/msword',
+  '.tsv': 'text/tab-separated-values',
   '.rtf': 'application/rtf',
+  '.doc': 'application/msword',
+  '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  '.xls': 'application/vnd.ms-excel',
+  '.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  '.ppt': 'application/vnd.ms-powerpoint',
+  '.pptx': 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+  '.odt': 'application/vnd.oasis.opendocument.text',
+  '.ods': 'application/vnd.oasis.opendocument.spreadsheet',
+  '.odp': 'application/vnd.oasis.opendocument.presentation',
+  '.epub': 'application/epub+zip',
+  '.eml': 'message/rfc822',
+  '.msg': 'application/vnd.ms-outlook',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.png': 'image/png',
+  '.gif': 'image/gif',
+  '.webp': 'image/webp',
+  '.heic': 'image/heic',
+  '.tif': 'image/tiff',
+  '.tiff': 'image/tiff',
+  '.mp3': 'audio/mpeg',
+  '.wav': 'audio/wav',
+  '.m4a': 'audio/mp4',
+  '.mp4': 'video/mp4',
+  '.mov': 'video/quicktime',
+  '.webm': 'video/webm',
+  '.zip': 'application/zip',
 };
 
-function inferMimeType(filePath: string): string {
+export function inferMimeType(filePath: string): string {
   const ext = extname(filePath).toLowerCase();
   return EXT_TO_MIME[ext] ?? 'application/octet-stream';
 }
@@ -244,7 +276,12 @@ const inputSchema = {
   fileType: z
     .string()
     .optional()
-    .describe('MIME type of the file (e.g. "application/pdf"). Inferred from filePath extension if omitted.'),
+    .describe(
+      'Media type of the file (e.g. "application/pdf"). Inferred from the filePath extension if omitted. A label only: ' +
+        'text is extracted from document formats (text, CSV, Markdown, JSON, YAML, HTML, XML, PDF, RTF, Office, ' +
+        'OpenDocument, EPUB, e-mail), detected from the file\'s content. Audio, video, images and archives are stored ' +
+        'but not read: their extraction.outcome is NOT_EXTRACTED.',
+    ),
 
   // Common (both modes):
   folderId: z
@@ -276,8 +313,8 @@ const documentIngest: ToolFactory = ({ client, log, transport, ingestRoot }) => 
     '  • File mode: pass `filePath` (local path on the MCP server\'s host machine). STDIO-TRANSPORT ONLY — ' +
     'rejected on HTTP transport. MCP server reads the bytes, requests a presigned upload URL, and PUTs them. ' +
     'Returns when the upload is accepted (indexStatus: PENDING_INDEX); poll `document_get` until indexStatus ' +
-    'is terminal: INDEXED, SKIPPED (no indexable text: `extraction.outcome` says why, e.g. NO_TEXT for an ' +
-    'image or a scanned page), STORED (indexMode NONE) or FAILED. EXCEPTION — re-ingesting file mode against an externalId that already has a document ' +
+    'is terminal: INDEXED, SKIPPED (no indexable text: `extraction.outcome` says why, e.g. NO_TEXT for a ' +
+    'scanned page, NOT_EXTRACTED for audio, video, an image or an archive), STORED (indexMode NONE) or FAILED. EXCEPTION — re-ingesting file mode against an externalId that already has a document ' +
     '(response `created:false`): the file body is replaced by ANY such re-ingest, whether or not `upsert` was ' +
     'set (`upsert` there only additionally applies `payload`/`title` to the matched document). The document ' +
     'keeps serving the OLD file\'s bytes until the new one is adopted, and indexStatus already reads INDEXED ' +
@@ -370,7 +407,7 @@ const documentIngest: ToolFactory = ({ client, log, transport, ingestRoot }) => 
     // storeText gate — the flag is a FILE-mode retention knob for the uploaded
     // file's EXTRACTED text. The inline-text path has no storeText field at all
     // (a text body is ALWAYS retained), so forwarding it there does nothing.
-    // Rejecting a passed value on the text path makes the surface honest instead
+    // Rejecting a passed value on the text path makes the surface accurate instead
     // of accepting-and-silently-ignoring it — a caller who passes storeText:false
     // on a text doc expecting a discard the text contract can never honor would
     // otherwise be silently misled.
@@ -459,6 +496,10 @@ const documentIngest: ToolFactory = ({ client, log, transport, ingestRoot }) => 
         confirmUntyped,
         fileName,
         fileType,
+        // The exact byte length: the upload is then bound (the URL is signed for this length and for the media type in the
+        // response's requiredHeaders), so a wrong body is refused before anything is stored. Required for a public-media type, optional for every other upload. The API takes
+        // a size of at least 1, so an empty file is sent unbound, as before.
+        ...(bytes.length > 0 ? { size: bytes.length } : {}),
         indexMode,
         storeText: storeTextFile,
         ...common,
@@ -474,11 +515,11 @@ const documentIngest: ToolFactory = ({ client, log, transport, ingestRoot }) => 
       }
 
       // PUT bytes to presigned URL. No Authorization header (the URL
-      // carries its own signature via query params). Any header the upload
+      // carries its own signature via query params). Every header the upload
       // response requires is part of that signature, so it is sent too.
       const putRes = await fetch(uploadUrl, {
         method: 'PUT',
-        headers: { 'Content-Type': fileType, ...presignedUploadHeaders(upload) },
+        headers: presignedPutHeaders(upload, fileType),
         body: bytes,
       });
 
@@ -549,23 +590,42 @@ const documentIngest: ToolFactory = ({ client, log, transport, ingestRoot }) => 
 export default documentIngest;
 
 /**
- * The extra header a presigned upload URL requires, as named by the upload response.
+ * The headers a presigned upload URL requires, as named by the upload response.
  *
- * The platform can bake an S3 conditional-write precondition (for example `If-None-Match: *`, which
- * makes the URL single-use) into the URL's own signature. A PUT that omits that header, or changes
- * its value, fails signature validation with a 403 before the bytes are accepted.
+ * A bound upload (one that sent `size`) is signed for an exact `Content-Type` and length, and the response's `requiredHeaders` map
+ * carries every header the PUT must send, the `Content-Type` among them (the media type in its stored form, which can differ from the
+ * `fileType` sent). The platform can also bake an S3 conditional-write precondition (for example `If-None-Match: *`, which makes the
+ * URL single-use) into the signature. A PUT that omits one of these, or changes its value, fails signature validation with a 403
+ * before the bytes are accepted.
  *
- * Read from the response, never hard-coded, and only when the response carries a name: an API
- * version that does not return these fields gets no extra header, exactly as before. Checked at
- * runtime because the SDK version in use may predate the fields and so cannot type them.
+ * The map is used when present; otherwise the older single `requiredHeaderName`/`requiredHeaderValue` pair, so an API version that
+ * does not return the map still works. Read from the response, never hard-coded, and checked at runtime.
  */
 export function presignedUploadHeaders(response: unknown): Record<string, string> {
   if (typeof response !== 'object' || response === null) return {};
-  const { requiredHeaderName, requiredHeaderValue } = response as {
+  const { requiredHeaders, requiredHeaderName, requiredHeaderValue } = response as {
+    requiredHeaders?: unknown;
     requiredHeaderName?: unknown;
     requiredHeaderValue?: unknown;
   };
+  if (typeof requiredHeaders === 'object' && requiredHeaders !== null && !Array.isArray(requiredHeaders)) {
+    const out: Record<string, string> = {};
+    for (const [k, v] of Object.entries(requiredHeaders as Record<string, unknown>)) {
+      if (k !== '' && typeof v === 'string') out[k] = v;
+    }
+    if (Object.keys(out).length > 0) return out;
+  }
   if (typeof requiredHeaderName !== 'string' || requiredHeaderName === '') return {};
   if (typeof requiredHeaderValue !== 'string') return {};
   return { [requiredHeaderName]: requiredHeaderValue };
+}
+
+/**
+ * The PUT's headers: the required ones, and `Content-Type: fileType` only when they do not name a `Content-Type` themselves (in
+ * any letter case: two spellings of one header would be sent as one combined value, which no signature matches).
+ */
+export function presignedPutHeaders(response: unknown, fileType: string): Record<string, string> {
+  const required = presignedUploadHeaders(response);
+  const namesContentType = Object.keys(required).some((k) => k.toLowerCase() === 'content-type');
+  return namesContentType ? required : { 'Content-Type': fileType, ...required };
 }

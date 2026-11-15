@@ -16,7 +16,7 @@ install for [Claude Desktop](https://claude.ai/download). Instead of editing
   extension always launches the latest published server (nothing is pinned or
   bundled). The key is passed through the environment.
 
-## Honest note on the key
+## A note on the key
 
 The extension does **not** provision a credential — there is no unattended
 signup. The key field's help text points at `npx -y @vectros-ai/cli bootstrap`,

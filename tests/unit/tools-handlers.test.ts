@@ -28,7 +28,7 @@ import documentAsk from '../../src/tools/document_ask.js';
 import listSchemas from '../../src/tools/list_schemas.js';
 import documentGet from '../../src/tools/document_get.js';
 import currentIdentity from '../../src/tools/current_identity.js';
-import documentIngest, { presignedUploadHeaders } from '../../src/tools/document_ingest.js';
+import documentIngest, { inferMimeType, presignedUploadHeaders, presignedPutHeaders } from '../../src/tools/document_ingest.js';
 import recordCreate from '../../src/tools/record_create.js';
 import lookupPrincipal from '../../src/tools/lookup_principal.js';
 import versionHistory from '../../src/tools/version_history.js';
@@ -154,6 +154,27 @@ test('hybrid_search returns isError when SDK throws', async () => {
   const r = await tool.handler({ query: 'q' }, {});
   assert.equal(r.isError, true);
   assert.match(r.content[0].text, /upstream 503/);
+});
+
+test('hybrid_search: a $near refused because the account\'s geo pilot is off reaches the agent as a clear tool error', async () => {
+  // The API answers 400 with the pilot wording; the SDK raises it with the parsed body, which toolError reports.
+  const message = 'The $near filter is not enabled for this account. Geo search is in a limited pilot; contact support to take part.';
+  let sent: Record<string, unknown> | undefined;
+  const client = {
+    search: {
+      content: async (req: Record<string, unknown>) => {
+        sent = req;
+        throw Object.assign(new Error('BadRequestError'), { statusCode: 400, body: { message, requestId: 'req_1' } });
+      },
+    },
+  } as never;
+  const tool = hybridSearch({ client, log });
+  const filters = { location: { $near: { lat: 47.6, lon: -122.3, radiusMeters: 5000 } } };
+  const r = await tool.handler({ filters }, {});
+  assert.deepEqual(sent?.filters, filters, 'the $near is forwarded unchanged');
+  assert.equal(r.isError, true);
+  assert.ok(r.content[0].text.includes(message), r.content[0].text);
+  assert.match(r.content[0].text, /400/);
 });
 
 // --- response ergonomics ---
@@ -1422,6 +1443,26 @@ test('document_get with includeText gracefully handles getText 404 (storeText no
   assert.equal(body.text, undefined);
 });
 
+test('document_get with includeText: a public-media document (409 NO_TEXT_FOR_MEDIA) returns its metadata with textAvailable: false; another 409 is a tool error', async () => {
+  const withTextError = (errorCode: string) =>
+    ({
+      documents: {
+        getDocument: async () => ({ id: 'doc_1', status: 'ACTIVE', indexStatus: 'SKIPPED' }),
+        getDocumentText: async () => {
+          throw Object.assign(new Error('Documents of this type are images and have no text.'), { statusCode: 409, body: { errorCode } });
+        },
+      },
+    }) as never;
+  const media = await documentGet({ client: withTextError('NO_TEXT_FOR_MEDIA'), log }).handler({ documentId: 'doc_1', includeText: true }, {});
+  assert.ok(!media.isError, 'a public-media document is not a tool error');
+  const body = parsedText(media) as Record<string, unknown>;
+  assert.equal(body.textAvailable, false);
+  assert.equal(body.id, 'doc_1', 'the metadata is returned');
+  assert.equal(body.text, undefined);
+  const other = await documentGet({ client: withTextError('VERSION_CONFLICT'), log }).handler({ documentId: 'doc_1', includeText: true }, {});
+  assert.equal(other.isError, true, 'any other 409 surfaces as a tool error');
+});
+
 test('document_get surfaces non-404 getText errors as tool error', async () => {
   const client = {
     documents: {
@@ -2173,6 +2214,96 @@ test('presignedUploadHeaders reads the header from the response and sends none w
   assert.deepEqual(presignedUploadHeaders(null), {});
 });
 
+test('presignedUploadHeaders prefers the requiredHeaders map, and falls back to the single pair', () => {
+  assert.deepEqual(
+    presignedUploadHeaders({
+      requiredHeaders: { 'Content-Type': 'image/png', 'If-None-Match': '*' },
+      requiredHeaderName: 'If-None-Match',
+      requiredHeaderValue: '*',
+    }),
+    { 'Content-Type': 'image/png', 'If-None-Match': '*' },
+  );
+  assert.deepEqual(presignedUploadHeaders({ requiredHeaders: {}, requiredHeaderName: 'If-None-Match', requiredHeaderValue: '*' }), { 'If-None-Match': '*' });
+  assert.deepEqual(presignedUploadHeaders({ requiredHeaders: { a: 1, '': 'x' } }), {}, 'non-string values and empty names are dropped');
+});
+
+test('presignedPutHeaders sends the signed Content-Type, never a second spelling of it', () => {
+  assert.deepEqual(presignedPutHeaders({ requiredHeaders: { 'content-type': 'image/png', 'If-None-Match': '*' } }, 'application/octet-stream'), {
+    'content-type': 'image/png',
+    'If-None-Match': '*',
+  });
+  assert.deepEqual(presignedPutHeaders({ requiredHeaderName: 'If-None-Match', requiredHeaderValue: '*' }, 'text/plain'), {
+    'Content-Type': 'text/plain',
+    'If-None-Match': '*',
+  });
+  assert.deepEqual(presignedPutHeaders({}, 'text/plain'), { 'Content-Type': 'text/plain' });
+  // a map that names no Content-Type keeps fileType's
+  assert.deepEqual(presignedPutHeaders({ requiredHeaders: { 'If-None-Match': '*' } }, 'text/plain'), {
+    'Content-Type': 'text/plain',
+    'If-None-Match': '*',
+  });
+});
+
+test('document_ingest file mode sends size (the exact byte length) and PUTs with the response\'s requiredHeaders', async () => {
+  const tmpFile = join(tmpdir(), `mcp-size-${process.pid}.bin`);
+  const bytes = Buffer.from('héllo bytes');
+  await writeFile(tmpFile, bytes);
+  const fetchCalls: Array<{ init?: RequestInit }> = [];
+  const originalFetch = globalThis.fetch;
+  // @ts-expect-error — test override.
+  globalThis.fetch = async (_input: string, init?: RequestInit) => {
+    fetchCalls.push({ init });
+    return { ok: true, status: 200, statusText: 'OK', text: async () => '' } as Response;
+  };
+  let sent: Record<string, unknown> | undefined;
+  try {
+    const client = {
+      documents: {
+        uploadDocument: async (args: Record<string, unknown>) => {
+          sent = args;
+          return {
+            id: 'doc_bound',
+            uploadUrl: 'https://s3.example/presigned?sig=x',
+            requiredHeaders: { 'Content-Type': 'application/x-stored-form', 'If-None-Match': '*' },
+            requiredHeaderName: 'If-None-Match',
+            requiredHeaderValue: '*',
+          };
+        },
+      },
+    } as never;
+    const tool = documentIngest({ client, log, transport: 'stdio', ingestRoot: tmpdir() });
+    const r = await tool.handler({ title: 'Bound', filePath: basename(tmpFile) }, {});
+    assert.ok(!r.isError, JSON.stringify(r));
+    assert.equal(sent?.size, bytes.length, 'size is the byte length, not the character count');
+    assert.deepEqual(fetchCalls[0].init?.headers, { 'Content-Type': 'application/x-stored-form', 'If-None-Match': '*' });
+  } finally {
+    globalThis.fetch = originalFetch;
+    await unlink(tmpFile).catch(() => {});
+  }
+});
+
+test('document_ingest file mode sends no size for an empty file (the API takes a size of at least 1)', async () => {
+  const tmpFile = join(tmpdir(), `mcp-empty-${process.pid}.txt`);
+  await writeFile(tmpFile, '');
+  const originalFetch = globalThis.fetch;
+  // @ts-expect-error — test override.
+  globalThis.fetch = async () => ({ ok: true, status: 200, statusText: 'OK', text: async () => '' }) as Response;
+  let sent: Record<string, unknown> | undefined;
+  try {
+    const client = {
+      documents: {
+        uploadDocument: async (args: Record<string, unknown>) => ((sent = args), { id: 'doc_e', uploadUrl: 'https://s3.example/p' }),
+      },
+    } as never;
+    const r = await documentIngest({ client, log, transport: 'stdio', ingestRoot: tmpdir() }).handler({ title: 'E', filePath: basename(tmpFile) }, {});
+    assert.ok(!r.isError, JSON.stringify(r));
+    assert.equal(sent !== undefined && 'size' in sent, false);
+  } finally {
+    globalThis.fetch = originalFetch;
+    await unlink(tmpFile).catch(() => {});
+  }
+});
+
 test('document_ingest file mode infers MIME from extension', async () => {
   const tmpPdf = join(tmpdir(), `mcp-test-${process.pid}.pdf`);
   await writeFile(tmpPdf, Buffer.from('%PDF-1.4'));
@@ -2196,6 +2327,34 @@ test('document_ingest file mode infers MIME from extension', async () => {
   } finally {
     globalThis.fetch = originalFetch;
     await unlink(tmpPdf).catch(() => {});
+  }
+});
+
+test('document_ingest infers the media type of office, open-document, mail, media and archive files', () => {
+  const cases: Array<[string, string]> = [
+    ['a.xlsx', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'],
+    ['a.XLS', 'application/vnd.ms-excel'],
+    ['deck.pptx', 'application/vnd.openxmlformats-officedocument.presentationml.presentation'],
+    ['a.ppt', 'application/vnd.ms-powerpoint'],
+    ['a.odt', 'application/vnd.oasis.opendocument.text'],
+    ['a.ods', 'application/vnd.oasis.opendocument.spreadsheet'],
+    ['a.odp', 'application/vnd.oasis.opendocument.presentation'],
+    ['book.epub', 'application/epub+zip'],
+    ['mail.eml', 'message/rfc822'],
+    ['mail.msg', 'application/vnd.ms-outlook'],
+    ['feed.xml', 'application/xml'],
+    ['conf.yaml', 'application/yaml'],
+    ['conf.yml', 'application/yaml'],
+    ['rows.tsv', 'text/tab-separated-values'],
+    ['photo.jpg', 'image/jpeg'],
+    ['song.mp3', 'audio/mpeg'],
+    ['clip.mp4', 'video/mp4'],
+    ['bundle.zip', 'application/zip'],
+    ['noextension', 'application/octet-stream'],
+    ['a.unknownext', 'application/octet-stream'],
+  ];
+  for (const [name, expected] of cases) {
+    assert.equal(inferMimeType(join(tmpdir(), name)), expected, name);
   }
 });
 

@@ -46,7 +46,8 @@ const recordGet: ToolFactory = ({ client, log }) => ({
     'Very large payloads are truncated to protect the agent context window. The response carries the ' +
     'record\'s processing `indexStatus`; when it is FAILED an `indexFailure.code` explains whether the ' +
     'content is still searchable (e.g. VECTOR_LIMIT_EXCEEDED keeps keyword search vs INDEXING_FAILED = not ' +
-    'findable at all) — branch on the `code`, not the message.',
+    'findable at all) — branch on the `code`, not the message.' +
+    ' An `INDEXED` item can also carry `indexFailure` with code LOCATION_NOT_INDEXED: a value in one of its `geo` fields is not a valid point, so it was indexed without that location and a location search does not find it.',
   inputSchema,
   // A pure read — never creates, modifies, or deletes anything server-side.
   annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true },
