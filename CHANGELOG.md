@@ -3,6 +3,21 @@
 All notable changes to `@vectros-ai/mcp-server` are documented here.
 This project adheres to [Semantic Versioning](https://semver.org).
 
+## 0.21.0 — 2026-11-25
+
+### Changed
+
+- **The bundled `@vectros-ai/sdk` is 0.51.0.**
+- **`document_get` with `includeDownloadUrl` on an image** (a public-media document) returns the link to the private
+  copy of the processed image, and sets `downloadAvailable: false` instead of failing when the platform answers `409`
+  `NO_DOWNLOAD_FOR_MEDIA` (a rejected, still-processing or taken-down image).
+- **`document_ingest` refuses an empty file.** A `filePath` that names a 0-byte file is an error, and no document is created.
+- The `document_ingest` `fileType` description says the upload is signed for the type as the server stores it.
+- The `list_schemas` description explains `publicView`, including that `mode: record` makes every declared field public, image fields included.
+- The identity resource and the `current_identity` description name `write-policy-declare` (API 0.51.0) among the capabilities a scope clause can carry that `current_identity` does not report.
+- The `document_ask` and `rag_ask` descriptions and the README describe the BAA boundary without naming the cloud provider.
+- The `document_update` and `folder_update` descriptions say that changing `userId` or `scopes` also needs the create permission (`documents:c`, `folders:c`) covering the new owner and scopes.
+
 ## 0.20.0 — 2026-11-14
 
 ### Changed

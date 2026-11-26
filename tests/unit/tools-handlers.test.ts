@@ -156,9 +156,11 @@ test('hybrid_search returns isError when SDK throws', async () => {
   assert.match(r.content[0].text, /upstream 503/);
 });
 
-test('hybrid_search: a $near refused because the account\'s geo pilot is off reaches the agent as a clear tool error', async () => {
-  // The API answers 400 with the pilot wording; the SDK raises it with the parsed body, which toolError reports.
-  const message = 'The $near filter is not enabled for this account. Geo search is in a limited pilot; contact support to take part.';
+test('hybrid_search: a $near refused because geo is off for the tenant reaches the agent as a clear tool error', async () => {
+  // The API answers 400 with this wording; the SDK raises it with the parsed body, which toolError reports. This proves
+  // pass-through only: whatever the platform says reaches the agent unchanged. The message here is a stand-in written for the test;
+  // the platform owns the refusal's wording, and this test does not check it.
+  const message = 'The $near filter is off for this tenant. An owner of the account can turn it on by signing the Geocoding waiver in the developer portal, under Geo & geocoding.';
   let sent: Record<string, unknown> | undefined;
   const client = {
     search: {
@@ -2122,7 +2124,6 @@ test('document_ingest file mode (replacement, created:false) warns to watch file
   await writeFile(tmpFile, 'replacement file body bytes');
 
   const originalFetch = globalThis.fetch;
-  // @ts-expect-error — test override.
   globalThis.fetch = async () =>
     ({ ok: true, status: 200, statusText: 'OK', text: async () => '' }) as Response;
 
@@ -2282,22 +2283,24 @@ test('document_ingest file mode sends size (the exact byte length) and PUTs with
   }
 });
 
-test('document_ingest file mode sends no size for an empty file (the API takes a size of at least 1)', async () => {
+test('document_ingest file mode refuses an empty file before creating a document (the upload needs a size of at least 1)', async () => {
   const tmpFile = join(tmpdir(), `mcp-empty-${process.pid}.txt`);
   await writeFile(tmpFile, '');
   const originalFetch = globalThis.fetch;
-  // @ts-expect-error — test override.
-  globalThis.fetch = async () => ({ ok: true, status: 200, statusText: 'OK', text: async () => '' }) as Response;
-  let sent: Record<string, unknown> | undefined;
+  let fetched = false;
+  globalThis.fetch = async () => ((fetched = true), { ok: true, status: 200, statusText: 'OK', text: async () => '' }) as Response;
+  let initCalled = false;
   try {
     const client = {
       documents: {
-        uploadDocument: async (args: Record<string, unknown>) => ((sent = args), { id: 'doc_e', uploadUrl: 'https://s3.example/p' }),
+        uploadDocument: async () => ((initCalled = true), { id: 'doc_e', uploadUrl: 'https://s3.example/p' }),
       },
     } as never;
     const r = await documentIngest({ client, log, transport: 'stdio', ingestRoot: tmpdir() }).handler({ title: 'E', filePath: basename(tmpFile) }, {});
-    assert.ok(!r.isError, JSON.stringify(r));
-    assert.equal(sent !== undefined && 'size' in sent, false);
+    assert.equal(r.isError, true, JSON.stringify(r));
+    assert.match(JSON.stringify(r.content), /empty \(0 bytes\)/);
+    assert.equal(initCalled, false, 'no upload init: no document is created');
+    assert.equal(fetched, false, 'nothing is PUT');
   } finally {
     globalThis.fetch = originalFetch;
     await unlink(tmpFile).catch(() => {});
@@ -3112,6 +3115,25 @@ test('document_get flags downloadAvailable:false for a text-only document (404/4
   assert.ok(!r.isError, 'a missing file is a flag, not an error');
   const body = parsedText(r) as Record<string, unknown>;
   assert.equal(body.downloadAvailable, false);
+});
+
+test('document_get with includeDownloadUrl: an image (409 NO_DOWNLOAD_FOR_MEDIA) flags downloadAvailable: false; another 409 is a tool error', async () => {
+  const withDownloadError = (errorCode: string) =>
+    ({
+      documents: {
+        getDocument: async () => ({ id: 'd1' }),
+        getDocumentDownloadUrl: async () => {
+          throw Object.assign(new Error('This image has no download: it was rejected, is still being processed, or was taken down.'), { statusCode: 409, body: { errorCode } });
+        },
+      },
+    }) as never;
+  const image = await documentGet({ client: withDownloadError('NO_DOWNLOAD_FOR_MEDIA'), log }).handler({ documentId: 'd1', includeDownloadUrl: true }, {});
+  assert.ok(!image.isError, 'an image is not a tool error');
+  const body = parsedText(image) as Record<string, unknown>;
+  assert.equal(body.downloadAvailable, false);
+  assert.equal(body.downloadUrl, undefined);
+  const other = await documentGet({ client: withDownloadError('VERSION_CONFLICT'), log }).handler({ documentId: 'd1', includeDownloadUrl: true }, {});
+  assert.equal(other.isError, true, 'any other 409 surfaces as a tool error');
 });
 
 // ── lookup_principal ─────────────────────────────────────────────────────────

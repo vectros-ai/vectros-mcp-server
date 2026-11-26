@@ -38,6 +38,15 @@ import { zodShapeToJsonSchema } from '../../src/zod-to-json-schema.js';
 
 const log = pino({ level: 'silent' });
 
+/**
+ * A parameter's description, read where zod 4 keeps it: its global registry (`.describe()` and `.meta()` both write there,
+ * and the classic `.description` getter reads it back). A tool's raw input shape types its values as the core schema, which
+ * carries no `.description` property, so read the registry instead of the getter.
+ */
+function descriptionOf(schema: z.core.$ZodType | undefined): string | undefined {
+  return schema === undefined ? undefined : z.globalRegistry.get(schema)?.description;
+}
+
 // Minimal fake SDK client — the schema tests don't call it.
 const fakeClient = {} as never;
 
@@ -287,7 +296,7 @@ test('document_ask accepts providerAlias as a non-empty string and rejects anyth
 // to learn them, so both tools must name every one.
 test('rag_ask and document_ask providerAlias descriptions name the three waiver errorCodes', () => {
   for (const name of ['rag_ask', 'document_ask'] as const) {
-    const d = String(tools[name].inputSchema.providerAlias.description);
+    const d = String(descriptionOf(tools[name].inputSchema.providerAlias));
     const named = [...new Set(d.match(/WAIVER_[A-Z_]+/g) ?? [])].sort();
     assert.deepEqual(named, ['WAIVER_NOT_SIGNED', 'WAIVER_REVOKED', 'WAIVER_TEXT_CHANGED'], `${name} providerAlias description names exactly the three public codes`);
   }
@@ -297,14 +306,36 @@ test('rag_ask and document_ask providerAlias descriptions name the three waiver 
 // that in the parameter description, and `current_identity` lists every capability the credential description omits.
 test('the update tools say a concurrent change is refused even without expectedVersion', () => {
   for (const name of ['record_update', 'document_update', 'folder_update'] as const) {
-    const d = String(tools[name].inputSchema.expectedVersion.description);
+    const d = String(descriptionOf(tools[name].inputSchema.expectedVersion));
     assert.match(d, /still refused as a conflict/, `${name} expectedVersion description`);
     assert.ok(!/last-write-wins/i.test(d), `${name} no longer promises last-write-wins`);
   }
 });
 
+// Moving an item to another owner or scopes needs the matching create grant as well as the update one; the agent reads that
+// in the tool description, before the refusal.
+test('document_update and folder_update say a change of owner or scopes also needs the create grant', () => {
+  const doc = String(tools.document_update.description);
+  const folder = String(tools.folder_update.description);
+  assert.match(doc, /documents:u/);
+  assert.match(doc, /changing userId or scopes also needs documents:c/);
+  assert.match(folder, /folders:u/);
+  assert.match(folder, /changing userId or scopes also needs folders:c/);
+});
+
 test('current_identity names trigger-control-plane-grant among the capabilities it does not report', () => {
   assert.match(String(tools.current_identity.description), /trigger-control-plane-grant/);
+});
+
+test('current_identity names write-policy-declare among the capabilities it does not report', () => {
+  assert.match(String(tools.current_identity.description), /write-policy-declare/);
+});
+
+test('list_schemas explains publicView and says there is no anonymous public-read tool', () => {
+  const d = String(tools.list_schemas.description);
+  assert.match(d, /publicView/);
+  assert.match(d, /mode `record` makes every declared field public/);
+  assert.match(d, /no anonymous public-read tool/);
 });
 
 test('current_identity names public-publish among the capabilities it does not report', () => {
@@ -318,8 +349,8 @@ test('current_identity names script-egress-declare among the capabilities it doe
 // What an agent reads about the generation limits has to match what the platform does with the default model: the
 // models that reason count the reasoning against `maxTokens`, and the same models ignore a `temperature`.
 test('rag_ask and document_ask maxTokens say that reasoning counts against it', () => {
-  const ragMax = String(tools.rag_ask.inputSchema.maxTokens.description);
-  const askMax = String(tools.document_ask.inputSchema.maxTokens.description);
+  const ragMax = String(descriptionOf(tools.rag_ask.inputSchema.maxTokens));
+  const askMax = String(descriptionOf(tools.document_ask.inputSchema.maxTokens));
   for (const d of [ragMax, askMax]) {
     assert.match(d, /reason before they answer/);
     assert.match(d, /when they do, the reasoning counts against this limit/);
@@ -328,14 +359,14 @@ test('rag_ask and document_ask maxTokens say that reasoning counts against it', 
 });
 
 test('rag_ask temperature says the models that do not accept one ignore it', () => {
-  const d = String(tools.rag_ask.inputSchema.temperature.description);
+  const d = String(descriptionOf(tools.rag_ask.inputSchema.temperature));
   assert.match(d, /ignores it for claude-haiku-5-5, claude-sonnet-5, claude-sonnet-5-5 and claude-opus-5-5/);
   assert.match(d, /claude-haiku-4-5/, 'names a model it still applies to');
 });
 
 test('rag_ask and document_ask model say the default comes from GET /v1/models, not a fixed name', () => {
   for (const tool of ['rag_ask', 'document_ask'] as const) {
-    const d = String(tools[tool].inputSchema.model.description);
+    const d = String(descriptionOf(tools[tool].inputSchema.model));
     assert.match(d, /defaultModel/);
     assert.doesNotMatch(d, /tier-appropriate Haiku/, 'the stale default wording is gone');
   }
@@ -730,8 +761,8 @@ test('hybrid_search and rag_ask describe scopeFilters as mutually exclusive with
   const ra = tools.rag_ask.inputSchema as Record<string, z.ZodTypeAny>;
   const searchShape = (ra.search as z.ZodOptional<z.ZodObject<z.ZodRawShape>>).unwrap().shape;
   assert.ok(searchShape.scopeFilters, 'rag_ask.search must expose scopeFilters');
-  assert.match(searchShape.scope!.description ?? '', /mutually exclusive/i);
-  assert.match(searchShape.scopeFilters!.description ?? '', /mutually exclusive/i);
+  assert.match(descriptionOf(searchShape.scope) ?? '', /mutually exclusive/i);
+  assert.match(descriptionOf(searchShape.scopeFilters) ?? '', /mutually exclusive/i);
 
   assert.match(tools.hybrid_search.description, /scopeFilters/);
   assert.match(tools.rag_ask.description, /scopeFilters/);
@@ -820,7 +851,7 @@ test('the date-window params are described as CREATION time — the platform con
   }
   const ra = tools.rag_ask.inputSchema as Record<string, z.ZodTypeAny>;
   const searchShape = (ra.search as z.ZodOptional<z.ZodObject<z.ZodRawShape>>).unwrap().shape;
-  assert.match(searchShape.createdAfter!.description ?? '', /CREATED/);
+  assert.match(descriptionOf(searchShape.createdAfter) ?? '', /CREATED/);
 
   // The hit-level field keeps the index-time note — that one IS index time.
   assert.match(tools.hybrid_search.description, /index/i);

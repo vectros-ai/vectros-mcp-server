@@ -151,8 +151,8 @@ const ragAsk: ToolFactory = ({ client, log }) => ({
     'filters, date window) to ground on a subset — e.g. one patient or one folder — and steer generation with ' +
     '`instructions` (and `temperature`, for the models that accept one). The full answer is returned as a single response; ' +
     'progress notifications keep the call alive during the 30-45s generation window. ' +
-    'Calls without `providerAlias` are served by platform-hosted AWS Bedrock. A call that sets `providerAlias` ' +
-    'goes to your own model provider, outside Vectros\'s AWS BAA boundary.',
+    'Calls without `providerAlias` are served by the platform. A call that sets `providerAlias` ' +
+    'goes to your own model provider, outside Vectros\'s BAA boundary (if you hold a BAA).',
   inputSchema,
   // NOT a pure read: this call reserves an atomic hold against the caller's prepaid inference
   // balance before generation starts, then debits it on completion — a real financial side

@@ -21,7 +21,7 @@ const identityResource: ResourceFactory = ({ log, apiKey, environment }) => ({
     '`current_identity` tool: status, tenantId, environment, principalType, principalKeyId, principalLabel, ' +
     '(for scoped credentials) allowedActions + dataScope ({ userId, scopes[] }). Note: this does not ' +
     'include granted_capabilities (member-lifecycle / forensic-read / context-directory-read / ' +
-    'delegate-mint, as of API 0.40.0, joined by delegate-principal-stamp in 0.42.0, trigger-control-plane-grant in 0.44.0, and public-publish and script-egress-declare in 0.50.0) — a separate ' +
+    'delegate-mint, as of API 0.40.0, joined by delegate-principal-stamp in 0.42.0, trigger-control-plane-grant in 0.44.0, public-publish and script-egress-declare in 0.50.0, and write-policy-declare in 0.51.0) — a separate ' +
     'reach dimension a scope clause can carry that /v1/ping ' +
     'does not report, so allowedActions+dataScope may understate a credential\'s true reach. Also ' +
     'reports mcpServerVersion and sdkVersion (this build\'s own version and the bundled @vectros-ai/sdk ' +

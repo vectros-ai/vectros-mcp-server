@@ -278,7 +278,7 @@ resolves to its main repo's `.mcp.json` — add and open from the same project.
 
 | Tool | What it does |
 |---|---|
-| `current_identity` | Describe the credential: tenantId, environment, principalType, principalKeyId, principalLabel, and (for scoped credentials) allowedActions + dataScope. Does **not** include `granted_capabilities` (`member-lifecycle` / `forensic-read` / `context-directory-read` / `delegate-mint`, as of API 0.40.0, joined by `delegate-principal-stamp` in 0.42.0, `trigger-control-plane-grant` in 0.44.0, and `public-publish` and `script-egress-declare` in 0.50.0) — a separate reach dimension a scope clause can carry that `/v1/ping` doesn't report, so allowedActions + dataScope may understate a credential's true reach. Also reports this server's own version and the bundled SDK version (`mcpServerVersion`, `sdkVersion`). |
+| `current_identity` | Describe the credential: tenantId, environment, principalType, principalKeyId, principalLabel, and (for scoped credentials) allowedActions + dataScope. Does **not** include `granted_capabilities` (`member-lifecycle` / `forensic-read` / `context-directory-read` / `delegate-mint`, as of API 0.40.0, joined by `delegate-principal-stamp` in 0.42.0, `trigger-control-plane-grant` in 0.44.0, and `public-publish` and `script-egress-declare` in 0.50.0, and `write-policy-declare` in 0.51.0) — a separate reach dimension a scope clause can carry that `/v1/ping` doesn't report, so allowedActions + dataScope may understate a credential's true reach. Also reports this server's own version and the bundled SDK version (`mcpServerVersion`, `sdkVersion`). |
 | `lookup_principal` | Resolve a user, or an identity entity in a namespace (`org`/`client`/any namespace you registered), by your own `externalId` (→ its Vectros UUID, for the ownership filters) or by a schema lookup field. Pass `contextId` to target a specific app context for a context-owned namespace. Read-only. |
 | `version_history` | Read the audit/version trail (CREATE/UPDATE/DELETE, with actor + diff) for one record or document. Read-only. |
 
@@ -372,7 +372,7 @@ config in the developer portal (**Model Providers**) before a call can use it. U
 call with a `403` that says it needs a BAA-holder attestation. The owner does this in the portal; nothing in this
 server does it.
 
-A call served by your own provider leaves the platform-hosted Bedrock path, and Vectros's AWS BAA boundary, so
+A call served by your own provider leaves the platform and the associated BAA boundary (for BAA holders), so
 decide deliberately whether a given call should use it. Nothing here is a statement about how a provider you chose handles your data.
 
 ### Opting into a subset
@@ -553,7 +553,7 @@ design-time layer that defines the data model.
   `Idempotency-Key` across attempts, and a tool call has no natural retry identity, so
   an agent re-invoking after a timeout would silently run the script a second time.
   Exposing this well needs a deliberate design for those two things, not a thin wrapper.
-  Until then, run scripts from a caller that can handle them — the API, the SDK, or the
+  Run scripts from a caller that can handle them — the API, the SDK, or the
   CLI.
 - **Trigger rules** (`/v1/triggers`). Declaring a rule grants authority — a rule's
   `scopes`/`roleIds` are live, and declaring one is scope-monotonicity-checked like

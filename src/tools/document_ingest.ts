@@ -271,14 +271,16 @@ const inputSchema = {
         'STDIO TRANSPORT ONLY — rejected on HTTP transport (remote MCP servers can\'t read your filesystem; ' +
         'use text mode or call the SDK\'s uploadDocument directly). ' +
         'Must resolve INSIDE the configured ingest root (VECTROS_MCP_INGEST_ROOT, else the server\'s working ' +
-        'directory); paths that escape it (traversal/absolute/symlink) or match a sensitive pattern are rejected.',
+        'directory); paths that escape it (traversal/absolute/symlink) or match a sensitive pattern are rejected. ' +
+        'An empty (0-byte) file is refused.',
     ),
   fileType: z
     .string()
     .optional()
     .describe(
-      'Media type of the file (e.g. "application/pdf"). Inferred from the filePath extension if omitted. A label only: ' +
-        'text is extracted from document formats (text, CSV, Markdown, JSON, YAML, HTML, XML, PDF, RTF, Office, ' +
+      'Media type of the file (e.g. "application/pdf"). Inferred from the filePath extension if omitted. The upload is ' +
+        'signed for this type as the server stores it (normalized, so it can differ from the type you give). The tool sends ' +
+        'the stored type. It does not decide extraction: text is extracted from document formats (text, CSV, Markdown, JSON, YAML, HTML, XML, PDF, RTF, Office, ' +
         'OpenDocument, EPUB, e-mail), detected from the file\'s content. Audio, video, images and archives are stored ' +
         'but not read: their extraction.outcome is NOT_EXTRACTED.',
     ),
@@ -485,6 +487,15 @@ const documentIngest: ToolFactory = ({ client, log, transport, ingestRoot }) => 
         );
       }
 
+      // The upload must declare the file's exact length, which is at least 1 byte, so an empty file cannot be uploaded.
+      // Refused here, before any document is created.
+      if (bytes.length === 0) {
+        return toolError(
+          'document_ingest',
+          new Error('The file at filePath is empty (0 bytes). Only a file with content can be uploaded.'),
+        );
+      }
+
       const fileName = basename(safePath);
       const fileType = (args.fileType as string | undefined) ?? inferMimeType(safePath);
 
@@ -497,9 +508,8 @@ const documentIngest: ToolFactory = ({ client, log, transport, ingestRoot }) => 
         fileName,
         fileType,
         // The exact byte length: the upload is then bound (the URL is signed for this length and for the media type in the
-        // response's requiredHeaders), so a wrong body is refused before anything is stored. Required for a public-media type, optional for every other upload. The API takes
-        // a size of at least 1, so an empty file is sent unbound, as before.
-        ...(bytes.length > 0 ? { size: bytes.length } : {}),
+        // response's requiredHeaders), so a wrong body is refused before anything is stored.
+        size: bytes.length,
         indexMode,
         storeText: storeTextFile,
         ...common,

@@ -65,6 +65,10 @@ const listSchemas: ToolFactory = ({ client, log }) => ({
   description:
     'List the structured-record schema catalog for your tenant. ' +
     'Each schema describes a record type (e.g. "patient", "clinical_note") — its fields, lookup-indexed fields, and capabilities. ' +
+    'A type published for anonymous reads carries `publicView`: mode `record` makes every declared field public (image ' +
+    'fields too, as image objects with a public address), mode `projection` only the fields it lists; records of such a type also show their `publicId` and ' +
+    '`publicState`. ' +
+    'This server reads with your own credential only; it has no anonymous public-read tool. ' +
     'Use this to discover what record types exist before calling `record_query`. ' +
     'Filter with `surface` (record/document/user/entity — e.g. only document types), `recordType` (resolve ' +
     'one schema by its type name), or `userId`/`scope`; default returns everything the credential can see.',

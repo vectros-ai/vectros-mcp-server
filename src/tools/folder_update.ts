@@ -16,7 +16,8 @@
  * If the folder changed since, the server rejects with a 409 conflict (re-read
  * via folder_query and retry). Without `expectedVersion` an update still fails with a 409 when it meets another change to the same item at the same moment.
  *
- * Requires the credential to allow `folders:u`.
+ * Requires the credential to allow `folders:u`. A change to `userId` or `scopes` also needs `folders:c` covering
+ * the folder's new owner and scopes.
  */
 import { z } from 'zod';
 import type { Vectros } from '@vectros-ai/sdk';
@@ -54,7 +55,8 @@ const folderUpdate: ToolFactory = ({ client, log }) => ({
   description:
     'Update a folder\'s name / description / ownership by id (RFC-7386 merge — omitted fields preserved). Pass ' +
     '`expectedVersion` (the version you last read) for safe concurrent edits — a stale update is refused (409). ' +
-    'Folders cannot be moved (re-parenting is not supported by the API). Requires the key to allow folders:u.',
+    'Folders cannot be moved (re-parenting is not supported by the API). Requires the key to allow folders:u; changing userId or scopes also needs folders:c ' +
+    'covering the new owner and scopes.',
   inputSchema,
   // A JSON Merge Patch — overwrites the fields it names, so it can destroy a prior field
   // value the caller did not mean to lose. Re-applying the same patch converges to the

@@ -15,7 +15,8 @@
  * If the document changed since, the server rejects with a 409 conflict (re-read
  * via document_get and retry). Without `expectedVersion` an update still fails with a 409 when it meets another change to the same item at the same moment.
  *
- * Requires the credential to allow `documents:u`.
+ * Requires the credential to allow `documents:u`. A change to `userId` or `scopes` also needs `documents:c` covering
+ * the document's new owner and scopes.
  */
 import { z } from 'zod';
 import type { Vectros } from '@vectros-ai/sdk';
@@ -95,7 +96,8 @@ const documentUpdate: ToolFactory = ({ client, log }) => ({
     'and preserved otherwise. Supply `text` to re-ingest and re-index the document body in place (text ' +
     'documents only). Set `status: "ARCHIVED"` to soft-retract a document (pulled from search, kept and ' +
     'recoverable) and `status: "ACTIVE"` to restore it. Pass `expectedVersion` (the version you last read) ' +
-    'for safe concurrent edits — a stale update is refused (409). Requires the key to allow documents:u.',
+    'for safe concurrent edits — a stale update is refused (409). Requires the key to allow documents:u; changing userId or scopes also needs documents:c ' +
+    'covering the new owner and scopes.',
   inputSchema,
   // A JSON Merge Patch — overwrites the fields it names, so it can destroy a prior field
   // value the caller did not mean to lose. Re-applying the same patch converges to the

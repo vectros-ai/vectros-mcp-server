@@ -8,7 +8,7 @@ import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtemp, mkdir, writeFile, symlink, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import pino from 'pino';
 
 import documentIngest from '../../src/tools/document_ingest.js';
@@ -103,6 +103,17 @@ test('rejects an absolute path outside the root', async () => {
   const r = await tool().handler({ title: 'X', filePath: outsideFile }, {});
   assert.equal(r.isError, true);
   assert.match(r.content[0].text, /outside the allowed ingest root/);
+});
+
+test('an EMPTY file outside the root gets the jail refusal, not the empty-file one (the jail is checked first)', async () => {
+  const outsideEmpty = join(dirname(outsideFile), 'empty.txt');
+  await writeFile(outsideEmpty, '');
+  const { calls, client } = recordingClient();
+  const r = await documentIngest({ client, log, transport: 'stdio', ingestRoot: root }).handler({ title: 'X', filePath: outsideEmpty }, {});
+  assert.equal(r.isError, true);
+  assert.match(r.content[0].text, /outside the allowed ingest root/);
+  assert.doesNotMatch(r.content[0].text, /is empty \(0 bytes\)/);
+  assert.equal(calls.length, 0);
 });
 
 test('rejects a symlink that escapes the root', async (t) => {

@@ -46,8 +46,8 @@ const documentAsk: ToolFactory = ({ client, log }) => ({
   description:
     'Ask a question against a single indexed document. Returns a grounded answer with the document context that informed it. ' +
     'For documents exceeding the input-token cap, the API returns a structured 413 with `estimatedTokens` and `limitTokens`. ' +
-    'Calls without `providerAlias` are served by platform-hosted AWS Bedrock. A call that sets `providerAlias` ' +
-    'goes to your own model provider, outside Vectros\'s AWS BAA boundary.',
+    'Calls without `providerAlias` are served by the platform. A call that sets `providerAlias` ' +
+    'goes to your own model provider, outside Vectros\'s BAA boundary (if you hold a BAA).',
   inputSchema,
   // NOT a pure read: this call reserves an atomic hold against the caller's prepaid inference
   // balance before generation starts, then debits it on completion — a real financial side

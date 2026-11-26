@@ -2,7 +2,7 @@
   "manifest_version": "0.3",
   "name": "vectros",
   "display_name": "Vectros — Memory for Agents",
-  "version": "0.20.0",
+  "version": "0.21.0",
   "description": "Backend-as-a-service for AI products, over MCP: records, documents, search and grounded answers.",
   "long_description": "Vectros is a backend-as-a-service built for AI products: a typed database, document ingestion, hybrid search, secure inference and serverless functions, behind one API. Every caller, whether a person, an agent or your own code, gets exactly the access you define, walled off from every other customer. This extension connects Claude Desktop to your Vectros tenant through 26 data-plane tools (typed records, documents, hybrid search, citation-grounded RAG, and running your stored agents). The server itself makes no call to the web and scrapes nothing; a stored agent you run can fetch a page when its definition lists web_fetch and your tenant's owner has switched it on. Web search is off on the platform by default.\n\nYou provide a least-privilege scoped key (ssk_...). Don't have one yet? Run `npx -y @vectros-ai/cli bootstrap` — it mints a scoped key and an AccessProfile for you (a one-time developer-portal sign-in is required).",
   "author": {
